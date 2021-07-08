@@ -1,0 +1,8 @@
+0
+Catchment Calibration Data
+./data/forcing/inputs.dat
+./data/catchment_bmi_configs/cat-3871/cat-3871.dat
+./data/param_files/params.dat
+topmod.out
+hyd.out
+720 1
