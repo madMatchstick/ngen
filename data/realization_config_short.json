@@ -87,7 +87,7 @@
                     "params": {
                         "model_type_name": "bmi_c_cfe",
                         "library_file": "./extern/alt-modular/cmake_am_libs/libcfebmi.so",
-                        "init_config": "./data/catchment_bmi_configs/cat-3773/cat-3773_bmi_config_cfe_pass.txt",
+                        "init_config": "./data/catchment_bmi_configs/cat-3773/cat-3773_bmi_config_cfe.txt",
                         "main_output_variable": "Q_OUT",
                         "registration_function": "register_bmi_cfe",
                         "variables_names_map": {
