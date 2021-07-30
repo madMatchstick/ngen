@@ -210,6 +210,11 @@ namespace geojson {
              * @return The property identified by the key
              */
             virtual JSONProperty get_property(std::string key) const {
+                if (properties.find(key) == properties.end()) {
+                    std::string error_message = "JSON Property '" + key + "' not found."; 
+                    throw std::invalid_argument(error_message);
+                }
+
                 return properties.at(key);
             }
 

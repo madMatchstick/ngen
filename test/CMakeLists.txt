@@ -16,6 +16,10 @@ if(LSTM_TORCH_LIB_ACTIVE)
     add_compile_definitions(LSTM_TORCH_LIB_TESTS_ACTIVE)
 endif()
 
+if(NGEN_ACTIVATE_ROUTING)
+    add_compile_definitions(ROUTING_PYBIND_TESTS_ACTIVE)
+endif()
+
 # Add test source files (e.g., test1.cpp)
 #add_executable(test_hymod models/hymod/include/HymodTest.cpp)
 #target_link_libraries(test_hymod gtest gtest_main)
@@ -33,7 +37,31 @@ macro(add_automated_test TESTNAME)
             NGen::geojson
             NGen::models_tshirt
             NGen::kernels_reservoir
-            NGen::realizations_catchment)
+            NGen::realizations_catchment
+            )
+    gtest_discover_tests(${TESTNAME}
+            WORKING_DIRECTORY ${PROJECT_DIR}
+            PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${PROJECT_DIR}"
+            )
+    set_target_properties(${TESTNAME} PROPERTIES FOLDER test)
+endmacro()
+
+macro(add_automated_test_w_routing TESTNAME)
+    add_executable(${TESTNAME} ${ARGN})
+    # This should include the same as the main ngen executable
+    target_link_libraries(${TESTNAME}
+            gtest
+            gtest_main
+            NGen::core
+            NGen::core_catchment
+            NGen::core_catchment_giuh
+            NGen::core_nexus
+            NGen::geojson
+            NGen::models_tshirt
+            NGen::kernels_reservoir
+            NGen::realizations_catchment
+            NGen::routing
+            )
     gtest_discover_tests(${TESTNAME}
             WORKING_DIRECTORY ${PROJECT_DIR}
             PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${PROJECT_DIR}"
@@ -124,9 +152,21 @@ if(LSTM_TORCH_LIB_ACTIVE)
    )
 endif()
 
+if(NGEN_ACTIVATE_ROUTING)
+   add_automated_test_w_routing(
+           test_routing_pybind
+           routing/Routing_Py_Bind_Test.cpp
+   )
+endif()
+
 add_automated_test(
         test_network
         core/NetworkTests.cpp
+)
+
+add_automated_test(
+        test_partition
+        utils/Partition_Test.cpp
 )
 
 # Unit tests
