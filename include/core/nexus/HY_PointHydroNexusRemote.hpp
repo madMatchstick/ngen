@@ -38,6 +38,34 @@ class HY_PointHydroNexusRemote : public HY_PointHydroNexus
 
         /** extract a numeric id from the catchment id for use as a mpi tag */
         static long extract(std::string s) {  return std::stoi(s.substr(4)); }
+        
+        bool is_remote_sender()
+        {
+            //if ( loc_map.size() > 0 )
+            if ( catchment_id_to_mpi_rank.size() > 0 )
+            {
+                auto receiving_list = get_receiving_catchments();
+                
+                for ( const auto& id : receiving_list )
+                {
+                    try
+                    {
+                        //auto& remote_rank = loc_map.at(id);
+                        auto& remote_rank = catchment_id_to_mpi_rank.at(id);
+                    }
+                    catch (std::exception &e)
+                    {
+                        continue;
+                    }
+                }
+                
+                return false;
+            }
+            else
+            {
+                return false;
+            }
+        }
 
 
         int get_world_rank();
