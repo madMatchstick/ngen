@@ -117,6 +117,21 @@ namespace models {
              */
             int GetInputItemCount();
 
+/*            int GetStateVarCount();
+
+            std::vector<std::string> GetStateVarNames();
+
+            std::string GetStateVarTypes(std::string name);
+
+            void GetStateVarPtrs(std::string name);
+
+            int GetStateVarSizes(std::string name);
+
+            //void SetStateVar(std::string name, void *src, int index);
+
+            void SetStateVar(std::string name);*/
+
+
             /**
              * Get input variable names for the backing model.
              *

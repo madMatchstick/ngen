@@ -66,6 +66,15 @@ namespace bmi {
       virtual void SetValue(std::string name, void *src) = 0;
       virtual void SetValueAtIndices(std::string name, int *inds, int count, void *src) = 0;
 
+      // New BMI functions to support serialization
+/*      virtual int GetStateVarCount() = 0;
+      virtual std::vector<std::string> GetStateVarNames() = 0;
+      virtual std::string GetStateVarTypes(std::string name) = 0;
+      virtual void *GetStateValuePtrs(std::string name) = 0;
+      virtual int GetStateVarSizes(std::string name) = 0;
+      //virtual void SetStateVar(std::string name, void *src, int index) = 0;
+      virtual void SetStateVar(std::string name) = 0;*/
+
       // Grid information functions
       virtual int GetGridRank(const int grid) = 0;
       virtual int GetGridSize(const int grid) = 0;
