@@ -27,6 +27,8 @@ class HY_PointHydroNexusRemote : public HY_PointHydroNexus
         typedef std::unordered_map <std::string, long> catcment_location_map_t;
 
         HY_PointHydroNexusRemote(std::string nexus_id, Catchments receiving_catchments, catcment_location_map_t loc_map);
+        HY_PointHydroNexusRemote(std::string nexus_id, Catchments receiving_catchments, Catchments contributing_catchments, catcment_location_map_t loc_map);
+
         virtual ~HY_PointHydroNexusRemote();
 
         /** get the request percentage of downstream flow through this nexus at timestep t. If the indicated catchment is not local a async send will be
@@ -39,39 +41,31 @@ class HY_PointHydroNexusRemote : public HY_PointHydroNexus
         /** extract a numeric id from the catchment id for use as a mpi tag */
         static long extract(std::string s) {  return std::stoi(s.substr(4)); }
         
+        const Catchments& get_local_contributing_catchments(){
+            return local_contributers;
+        };
+
+		/** Test if this nexus is a sending nexus in a remote nexus pair */
         bool is_remote_sender()
         {
-            //if ( loc_map.size() > 0 )
-            if ( catchment_id_to_mpi_rank.size() > 0 )
-            {
-                auto receiving_list = get_receiving_catchments();
-                
-                for ( const auto& id : receiving_list )
-                {
-                    try
-                    {
-                        //auto& remote_rank = loc_map.at(id);
-                        auto& remote_rank = catchment_id_to_mpi_rank.at(id);
-                    }
-                    catch (std::exception &e)
-                    {
-                        continue;
-                    }
-                }
-                
-                return false;
-            }
-            else
-            {
-                return false;
-            }
+            return type == sender || type == sender_receiver;
         }
 
 
         int get_world_rank();
 
         long get_time_step();
-
+        
+        enum communication_type 
+        {
+        	local,
+        	sender,
+        	receiver,
+            sender_receiver
+        };
+        
+        /** return the communicator type for this nexus */
+		communication_type get_communicator_type() { return type; }
 
     private:
         void process_communications();
@@ -103,8 +97,66 @@ class HY_PointHydroNexusRemote : public HY_PointHydroNexus
         std::list<async_request> stored_sends;
 
         std::string nexus_prefix = "cat-";
-
+        
+        /** The type of communication at this nexus
+         *
+         */
+        communication_type type;
+        /** List of ranks we expect to send data to (downstream).
+         *
+         *  Note that in a dendridic network, downstream_ranks.size() == 1 (only one downstream receiver on a single rank)
+         */
+        std::unordered_set<int> downstream_ranks; //Set
+        /** List of ranks we expect to receive data from
+         * 
+         */
+        std::unordered_set<int> upstream_ranks; //Set
+        /** Catchments local to the same MPI rank which contribute (call add_upstream_flow) to this nexus
+         * 
+         */
+        Catchments local_contributers;
+        /** Catchments NOT local to this rank which contribute (call add_upstream_flow) to this nexus
+         * 
+         */
+        Catchments remote_contributers;
+        /** Catchments local to the same MPI rank which receive (call get_downstream_flow) from this nexus
+         * 
+         */
+        Catchments local_receivers;
+        /** Catchments NOT local to this rank which receive (call get_downstream_flow) from this nexus
+         * 
+         */
+        Catchments remote_receivers;
 };
+
+namespace std
+{
+	inline std::string to_string(HY_PointHydroNexusRemote::communication_type t)
+	{
+		switch(t)
+		{
+			case HY_PointHydroNexusRemote::communication_type::local:
+			
+			return std::string("local");
+			break;
+			
+			case HY_PointHydroNexusRemote::communication_type::sender:
+
+			return std::string("sender");
+			break;
+			
+			case HY_PointHydroNexusRemote::communication_type::receiver:
+			
+			return std::string("receiver");
+			break;
+			
+			case HY_PointHydroNexusRemote::communication_type::sender_receiver:
+			
+			return std::string("sender_receiver");
+			break;
+		}
+	}
+}
 
 #endif // NGEN_MPI_ACTIVE
 #endif // HY_POINTHYDRONEXUSREMOTEDOWNSTREAM_H

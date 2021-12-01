@@ -2,10 +2,15 @@
 #define NGEN_BMI_MODULE_FORMULATION_H
 
 #include <utility>
+#include <memory>
 #include "Bmi_Formulation.hpp"
 #include "EtCalcProperty.hpp"
 #include "EtCombinationMethod.hpp"
 #include "WrappedForcingProvider.hpp"
+#include "Bmi_C_Adapter.hpp"
+#include <AorcForcing.hpp>
+#include <ForcingProvider.hpp>
+#include <UnitsHelper.hpp>
 
 // Forward declaration to provide access to protected items in testing
 class Bmi_Formulation_Test;
@@ -29,28 +34,36 @@ namespace realization {
          * ``create_formulation``.
          *
          * @param id
-         * @param forcing_config
+         * @param forcing_provider
          * @param output_stream
          */
-        Bmi_Module_Formulation(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream)
-                : Bmi_Formulation(std::move(id), std::move(forcing_config), output_stream) { };
-
-        Bmi_Module_Formulation(std::string id, Forcing forcing, utils::StreamHandler output_stream)
-                : Bmi_Formulation(std::move(id), forcing, output_stream) { };
+        Bmi_Module_Formulation(std::string id, std::unique_ptr<forcing::ForcingProvider> forcing_provider, utils::StreamHandler output_stream)
+                : Bmi_Formulation(std::move(id), std::move(forcing_provider), output_stream) { };
 
         virtual ~Bmi_Module_Formulation() {};
 
         /**
          * Perform (potential) ET calculation, getting input params from instance's backing model as needed.
          *
-         * Function uses AORC forcings from the "current" time step.
+         * Function uses forcings from the "current" time step.
          *
          * @return Calculated ET or potential ET, or ``0.0`` if required parameters could not be obtained.
          */
         double calc_et() override {
-            return calc_et(
-                    get_ts_index_for_time(convert_model_time(get_bmi_model()->GetCurrentTime()) +
-                                          get_bmi_model_start_time_forcing_offset_s()));
+            long timestep = 3600;
+            time_t model_time = convert_model_time(get_bmi_model()->GetCurrentTime()) + get_bmi_model_start_time_forcing_offset_s();
+
+            struct AORC_data raw_aorc;
+            raw_aorc.TMP_2maboveground_K = forcing->get_value(CSDMS_STD_NAME_SURFACE_TEMP, model_time, timestep, "K");
+            raw_aorc.SPFH_2maboveground_kg_per_kg = forcing->get_value(NGEN_STD_NAME_SPECIFIC_HUMIDITY, model_time, timestep, "kg/kg");
+            raw_aorc.PRES_surface_Pa = forcing->get_value(CSDMS_STD_NAME_SURFACE_AIR_PRESSURE, model_time, timestep, "Pa");
+            raw_aorc.UGRD_10maboveground_meters_per_second = forcing->get_value(CSDMS_STD_NAME_WIND_U_X, model_time, timestep, "m s^-1");
+            raw_aorc.VGRD_10maboveground_meters_per_second = forcing->get_value(CSDMS_STD_NAME_WIND_V_Y, model_time, timestep, "m s^-1");
+            raw_aorc.DSWRF_surface_W_per_meters_squared = forcing->get_value(CSDMS_STD_NAME_SOLAR_SHORTWAVE, model_time, timestep, "W m^-2");
+            raw_aorc.DLWRF_surface_W_per_meters_squared = forcing->get_value(CSDMS_STD_NAME_SOLAR_LONGWAVE, model_time, timestep, "W m^-2");
+            raw_aorc.APCP_surface_kg_per_meters_squared = forcing->get_value(CSDMS_STD_NAME_LIQUID_EQ_PRECIP_RATE, model_time, timestep, "kg m^-2");
+
+            return calc_et(raw_aorc);
         }
 
         double calc_et(struct AORC_data raw_aorc) {
@@ -86,13 +99,9 @@ namespace realization {
             et_options.yes_aorc = TRUE;
             et_options.use_energy_balance_method   = FALSE;
             et_options.use_aerodynamic_method      = FALSE;
-            et_options.use_combination_method      = FALSE;
+            et_options.use_combination_method      = TRUE;
             et_options.use_priestley_taylor_method = FALSE;
-            et_options.use_penman_monteith_method  = TRUE;
-
-            // TODO: do we really actually need this, if we are converting to another forcing struct?
-            // TODO: WHY ARE THERE SO MANY FORCING STRUCTS!?!
-            struct et::aorc_forcing_data aorc = convert_aorc_structs(raw_aorc);
+            et_options.use_penman_monteith_method  = FALSE;
 
             struct et::evapotranspiration_forcing et_forcing;
             et_forcing.air_temperature_C = raw_aorc.TMP_2maboveground_K - TK;  // gotta convert it to C
@@ -174,7 +183,9 @@ namespace realization {
             // Surface radiation forcing parameter values that must come from other models
             //--------------------------------------------------------------------------------------------------------
             surf_rad_forcing.surface_skin_temperature_C = made_up_surface_skin_temperature_C;
-
+            //Compute net_radiation et forcing value
+            et_forcing.net_radiation_W_per_sq_m=et::calculate_net_radiation_W_per_sq_m(&et_options,&surf_rad_params, 
+                                                                         &surf_rad_forcing);
             // TODO: and this just needs to be created with nothing set?
             struct et::intermediate_vars inter_vars;
 
@@ -221,6 +232,7 @@ namespace realization {
          * config's output variable mapping.
          *
          * @return The collection of forcing output property names this instance can provide.
+         * @see ForcingProvider
          */
         const vector<std::string> &get_available_forcing_outputs() override {
             if (is_model_initialized() && available_forcings.empty()) {
@@ -246,7 +258,7 @@ namespace realization {
          */
         time_t get_forcing_output_time_begin(const std::string &forcing_name) override {
             // TODO: come back and implement if actually necessary for this type; for now don't use
-            throw runtime_error("Bmi_Singular_Formulation does not yet implement get_forcing_output_time_begin");
+            throw runtime_error("Bmi_Modular_Formulation does not yet implement get_forcing_output_time_begin");
         }
 
         /**
@@ -260,7 +272,25 @@ namespace realization {
          */
         time_t get_forcing_output_time_end(const std::string &output_name) override {
             // TODO: come back and implement if actually necessary for this type; for now don't use
-            throw runtime_error("Bmi_Singular_Formulation does not yet implement get_forcing_output_time_end");
+            throw runtime_error("Bmi_Modular_Formulation does not yet implement get_forcing_output_time_end");
+        }
+
+        /**
+         * Get the current time for the backing BMI model in its native format and units.
+         *
+         * @return The current time for the backing BMI model in its native format and units.
+         */
+        const double get_model_current_time() override {
+            return get_bmi_model()->GetCurrentTime();
+        }
+
+        /**
+         * Get the end time for the backing BMI model in its native format and units.
+         *
+         * @return The end time for the backing BMI model in its native format and units.
+         */
+        const double get_model_end_time() override {
+            return get_bmi_model()->GetEndTime();
         }
 
         const vector<std::string> &get_required_parameters() override {
@@ -302,7 +332,7 @@ namespace realization {
          * @return The index of the forcing time step that contains the given point in time.
          * @throws std::out_of_range If the given point is not in any time step.
          */
-        size_t get_ts_index_for_time(const time_t &epoch_time) {
+        size_t get_ts_index_for_time(const time_t &epoch_time) override {
             // TODO: come back and implement if actually necessary for this type; for now don't use
             throw runtime_error("Bmi_Singular_Formulation does not yet implement get_ts_index_for_time");
         }
@@ -322,9 +352,10 @@ namespace realization {
          * @param output_units The expected units of the desired output value.
          * @return The value of the forcing property for the described time period, with units converted if needed.
          * @throws std::out_of_range If data for the time period is not available.
+         * @see ForcingProvider::get_value
          */
         double get_value(const std::string &output_name, const time_t &init_time, const long &duration_s,
-                         const std::string &output_units)
+                         const std::string &output_units) override
         {
             // First make sure this is an available output
             const std::vector<std::string> forcing_outputs = get_available_forcing_outputs();
@@ -341,8 +372,10 @@ namespace realization {
             */
 
             // Handle ET requests slightly differently
+            //TODO: This should really only happen if neither of these output_names are provided by the module...
+            // But this code should also probably be removed in the near future (see GH #297 second comment).
             if (output_name == NGEN_STD_NAME_POTENTIAL_ET_FOR_TIME_STEP || output_name == CSDMS_STD_NAME_POTENTIAL_ET) {
-                return calc_et(forcing.get_ts_index_for_time(init_time));
+                return calc_et();
             }
 
             // If not ET, now get correct BMI variable name, which may be the output or something mapped to this output.
@@ -360,14 +393,31 @@ namespace realization {
                     }
                 }
             }
-            // Then return the value
-            // TODO: also just assume units are the same, but need to implement this correctly later
-            return get_var_value_as_double(bmi_var_name);
+            
+            double value = get_var_value_as_double(bmi_var_name);
+
+            // Convert units
+            std::string native_units = get_bmi_model()->GetVarUnits(bmi_var_name);
+            try {
+                return UnitsHelper::get_converted_value(native_units, value, output_units);
+            }
+            catch (const std::runtime_error& e){
+                std::cerr<<"Unit conversion error: "<<std::endl<<e.what()<<std::endl<<"Returning unconverted value!"<<std::endl;
+                return value;
+            }
         }
 
-        virtual inline bool is_bmi_input_variable(const std::string &var_name) = 0;
+        bool is_bmi_input_variable(const std::string &var_name) override {
+           return is_var_name_in_collection(get_bmi_input_variables(), var_name);
+        }
 
-        virtual inline bool is_bmi_output_variable(const std::string &var_name) = 0;
+        bool is_bmi_output_variable(const std::string &var_name) override {
+            return is_var_name_in_collection(get_bmi_output_variables(), var_name);
+        }
+
+        inline bool is_var_name_in_collection(const std::vector<std::string> &all_names, const std::string &var_name) {
+            return std::count(all_names.begin(), all_names.end(), var_name) > 0;
+        }
 
         /**
          * Get whether a property's per-time-step values are each an aggregate sum over the entire time step.
@@ -382,20 +432,25 @@ namespace realization {
          * It may be the case that forcing data is needed for some discretization different than the forcing time step.
          * This aspect must be known in such cases to perform the appropriate value interpolation.
          *
-         * For this type, all outputs are of this type.
+         * For instances of this type, all output forcings fall under this category.
          *
          * @param name The name of the forcing property for which the current value is desired.
          * @return Whether the property's value is an aggregate sum, which is always ``true`` for this type.
          */
         bool is_property_sum_over_time_step(const std::string& name) override {
+            // TODO: verify with some kind of proof that "always true" is appropriate
             return true;
         }
 
-    protected:
-
-        double calc_et(size_t forcing_ts_index) {
-            return calc_et(forcing.get_aorc_for_index(forcing_ts_index));
+        const vector<string> get_bmi_input_variables() override {
+            return get_bmi_model()->GetInputVarNames();
         }
+
+        const vector<string> get_bmi_output_variables() override {
+            return get_bmi_model()->GetOutputVarNames();
+        }
+
+    protected:
 
         /**
          * Construct model and its shared pointer, potentially supplying input variable values from config.
@@ -410,18 +465,6 @@ namespace realization {
         virtual std::shared_ptr<M> construct_model(const geojson::PropertyMap& properties) = 0;
 
         /**
-         * Convert a time value from the model to an epoch time in seconds.
-         *
-         * Model time values are typically (though not always) 0-based totals count upward as time progresses.  The
-         * units are not necessarily seconds.  This performs the necessary lookup and conversion for such units, and
-         * then shifts the value appropriately for epoch time representation.
-         *
-         * @param model_time
-         * @return
-         */
-        virtual time_t convert_model_time(const double &model_time) = 0;
-
-        /**
          * Determine and set the offset time of the model in seconds, compared to forcing data.
          *
          * BMI models frequently have their model start time be set to 0.  As such, to know what the forcing time is
@@ -432,7 +475,8 @@ namespace realization {
         void determine_model_time_offset() {
             set_bmi_model_start_time_forcing_offset_s(
                     // TODO: Look at making this epoch start configurable instead of from forcing
-                    forcing.get_time_epoch() - convert_model_time(get_bmi_model()->GetStartTime()));
+                    //WARN: This change potentially changes the behavior, though the previous behavior was incorrect.
+                    forcing->get_forcing_output_time_begin("") - convert_model_time(get_bmi_model()->GetStartTime()));
         }
 
         /**
@@ -467,115 +511,12 @@ namespace realization {
             return bmi_model;
         }
 
-        const string &get_forcing_file_path() const {
+        const string &get_forcing_file_path() const override {
             return forcing_file_path;
         }
 
         const time_t &get_bmi_model_start_time_forcing_offset_s() override {
             return bmi_model_start_time_forcing_offset_s;
-        }
-
-        /**
-         * Get model input values from forcing data, accounting for model and forcing time steps not aligning.
-         *
-         * Get values to use to set model input variables for forcings, sourced from this instance's forcing data.  Skip
-         * any params in the collection that are not forcing params, as indicated by the given collection.  Account for
-         * if model time step (MTS) does not align with forcing time step (FTS), either due to MTS starting after the
-         * start of FTS, MTS extending beyond the end of FTS, or both.
-         *
-         * @param t_delta The size of the model's time step in seconds.
-         * @param model_initial_time The model's current time in its internal units and representation.
-         * @param params An ordered collection of desired forcing param names from which data for inputs is needed.
-         * @param is_aorc_param Whether the param at each index is an AORC forcing param, or a different model param
-         *                      (which thus does not need to be processed here).
-         * @param param_units An ordered collection units of strings representing the BMI model's expected units for the
-         *                    corresponding input, so that value conversions of the proportional contributions are done.
-         * @param summed_contributions A referenced, ordered collection containing the returned summed contributions.
-         */
-        inline void get_forcing_data_ts_contributions(time_step_t t_delta, const double &model_initial_time,
-                                                      const std::vector<std::string> &params,
-                                                      const std::vector<bool> &is_aorc_param,
-                                                      const std::vector<std::string> &param_units,
-                                                      std::vector<double> &summed_contributions)
-        {
-            // TODO: probably deprecated and needs to be removed
-            time_t model_ts_start_offset, model_ts_seconds_contained_in_forcing_ts, model_epoch_time_s;
-            // Keep track of how much of the model ts delta has not yet had its contribution pulled from some forcing ts
-            time_step_t contribution_seconds_remaining = t_delta;
-
-            model_epoch_time_s = (time_t) (get_bmi_model()->convert_model_time_to_seconds(model_initial_time)) +
-                                 get_bmi_model_start_time_forcing_offset_s();
-            // Make sure the forcings are properly primed to have the correct corresponding forcing ts data available
-            while (model_epoch_time_s > forcing.get_time_epoch() + forcing.get_time_step_size()) {
-                forcing.get_next_hourly_precipitation_meters_per_second();
-            }
-            // Though this is a problem at the moment, because we can't go through forcings in reverse order
-            if (model_epoch_time_s < forcing.get_time_epoch()) {
-                // TODO: think if there is a better way to address this
-                // TODO: should we include <typeinfo> and use typeid(this).name() to print class?
-                //  (Also, should there be a directive-controlled option for that?)
-                throw std::runtime_error(get_formulation_type() + " formulation for model '" + get_model_type_name() +
-                                         "' can't get contributions for model time step " + to_string(t_delta) + " starting at "
-                                         + to_string(model_epoch_time_s) + ", as current forcing time step doesn't start until "
-                                         + to_string(forcing.get_time_epoch()));
-            }
-
-            model_ts_start_offset = model_epoch_time_s - forcing.get_time_epoch();
-
-            while (contribution_seconds_remaining > 0) {
-                // Note that model_ts_start_offset shift is cleared (set to 0) at end of loop, so only has effect once.
-                // If remainder of model ts (after shift in first iteration) ends before forcing ts ...
-                if ((time_t) contribution_seconds_remaining + model_ts_start_offset < forcing.get_time_step_size()) {
-                    model_ts_seconds_contained_in_forcing_ts = (time_t) contribution_seconds_remaining;
-                }
-                else {
-                    model_ts_seconds_contained_in_forcing_ts = forcing.get_time_step_size() - model_ts_start_offset;
-                }
-
-                // Get the contributions from this forcing ts for all the forcing params needed.
-                for (size_t i = 0; i < params.size(); ++i) {
-                    // Skip indices for parameters that are not forcings
-                    if (!is_aorc_param[i]) {
-                        continue;
-                    }
-                    // This is proportional to ratio of (model ts secs in this forcing ts) to (FORCING ts total secs)
-                    if (forcing.is_param_sum_over_time_step(params[i])) {
-                        summed_contributions[i] +=
-                                forcing.get_converted_value_for_param_in_units(params[i], param_units[i]) *
-                                (double) model_ts_seconds_contained_in_forcing_ts /
-                                (double) forcing.get_time_step_size();
-                    }
-                    // This is proportional to the ratio of (model ts secs in this forcing ts) to (MODEL ts total secs)
-                    else {
-                        summed_contributions[i] +=
-                                forcing.get_converted_value_for_param_in_units(params[i], param_units[i]) *
-                                (double) model_ts_seconds_contained_in_forcing_ts /
-                                (double) t_delta;
-                    }
-                }
-
-                // Account for the processed model time compared to the entire delta
-                contribution_seconds_remaining -= (time_step_t)model_ts_seconds_contained_in_forcing_ts;
-                // The offset should only possibly be non-zero the first time (after, if the model ts extends beyond the first
-                // forcing ts, it always picks up at the beginning of the subsequent forcing ts), so set to 0 now.
-                model_ts_start_offset = 0;
-                // Also, when appropriate incrementing the forcing ts
-                if (contribution_seconds_remaining > 0) {
-                    forcing.get_next_hourly_precipitation_meters_per_second();
-                }
-            }
-        }
-
-        /**
-         * Get the names of variables in formulation output.
-         *
-         * Get the names of the variables to include in the output from this formulation, which should be some ordered
-         * subset of the output variables from the model.
-         *
-         * @return
-         */
-        const vector<std::string> &get_output_variable_names() const {
-            return output_variable_names;
         }
 
         /**
@@ -697,6 +638,9 @@ namespace realization {
             std::shared_ptr<forcing::ForcingProvider> self = std::make_shared<forcing::WrappedForcingProvider>(this);
             input_forcing_providers[NGEN_STD_NAME_POTENTIAL_ET_FOR_TIME_STEP] = self;
             input_forcing_providers[CSDMS_STD_NAME_POTENTIAL_ET] = self;
+
+            // Finally, make sure this is set
+            model_initialized = get_bmi_model()->is_model_initialized();
         }
 
         /**
@@ -704,7 +648,7 @@ namespace realization {
          *
          * @return Whether backing model has fixed time step size.
          */
-        bool is_bmi_model_time_step_fixed() {
+        bool is_bmi_model_time_step_fixed() override {
             return bmi_model_time_step_fixed;
         }
 
@@ -713,7 +657,7 @@ namespace realization {
          *
          * @return Whether the backing model uses/reads the forcing file directly for getting input data.
          */
-        bool is_bmi_using_forcing_file() const {
+        bool is_bmi_using_forcing_file() const override {
             return bmi_using_forcing_file;
         }
 
@@ -722,7 +666,7 @@ namespace realization {
          *
          * @return Whether backing model object has been initialize using the BMI standard ``Initialize`` function.
          */
-        virtual bool is_model_initialized() {
+        bool is_model_initialized() override {
             return model_initialized;
         };
 
@@ -773,6 +717,44 @@ namespace realization {
             model_initialized = is_initialized;
         }
 
+        // TODO: need to modify this to support arrays properly, since in general that's what BMI modules deal with
+        template<typename T>
+        std::shared_ptr<void> get_value_as_type(std::string type, T value)
+        {
+            if (type == "double" || type == "double precision")
+                return std::make_shared<double>( static_cast<double>(value) );
+
+            if (type == "float" || type == "real")
+                return std::make_shared<float>( static_cast<float>(value) );
+
+            if (type == "short" || type == "short int" || type == "signed short" || type == "signed short int")
+                return std::make_shared<short>( static_cast<short>(value) );
+
+            if (type == "unsigned short" || type == "unsigned short int")
+                return std::make_shared<unsigned short>( static_cast<unsigned short>(value) );
+
+            if (type == "int" || type == "signed" || type == "signed int" || type == "integer")
+                return std::make_shared<int>( static_cast<int>(value) );
+
+            if (type == "unsigned" || type == "unsigned int")
+                return std::make_shared<unsigned int>( static_cast<unsigned int>(value) );
+
+            if (type == "long" || type == "long int" || type == "signed long" || type == "signed long int")
+                return std::make_shared<long>( static_cast<long>(value) );
+
+            if (type == "unsigned long" || type == "unsigned long int")
+                return std::make_shared<unsigned long>( static_cast<unsigned long>(value) );
+
+            if (type == "long long" || type == "long long int" || type == "signed long long" || type == "signed long long int")
+                return std::make_shared<long long>( static_cast<long long>(value) );
+
+            if (type == "unsigned long long" || type == "unsigned long long int")
+                return std::make_shared<unsigned long long>( static_cast<unsigned long long>(value) );
+
+            throw std::runtime_error("Unable to get value of variable as type" + type + " from " + get_model_type_name() +
+                " : no logic for converting value to variable's type.");
+        }
+
         /**
          * Set BMI input variable values for the model appropriately prior to calling its `BMI `update()``.
          *
@@ -794,32 +776,24 @@ namespace realization {
                     provider = input_forcing_providers[var_name].get();
                 }
                 else {
-                    provider = &forcing;
+                    provider = forcing.get();
                 }
                 // TODO: probably need to actually allow this by default and warn, but have config option to activate
                 //  this type of behavior
                 // TODO: account for arrays later
-                if (get_bmi_model()->GetVarItemsize(var_name) != get_bmi_model()->GetVarNbytes(var_name)) {
+                int varItemSize = get_bmi_model()->GetVarItemsize(var_name);
+                if (varItemSize != get_bmi_model()->GetVarNbytes(var_name)) {
                     throw std::runtime_error(
                             "BMI input variable '" + var_name + "' is an array - not currently supported");
                 }
                 double value = provider->get_value(var_map_alias, model_epoch_time, t_delta,
                                                    get_bmi_model()->GetVarUnits(var_name));
                 // Finally, use the value obtained to set the model input
-                get_bmi_model()->SetValue(var_name, (void*)&value);
+                std::string type = get_bmi_model()->get_analogous_cxx_type(get_bmi_model()->GetVarType(var_name),
+                                                                           varItemSize);
+                std::shared_ptr<void> value_ptr = get_value_as_type(type, value);
+                get_bmi_model()->SetValue(var_name, value_ptr.get());
             }
-        }
-
-        /**
-         * Set the names of variables in formulation output.
-         *
-         * Set the names of the variables to include in the output from this formulation, which should be some ordered
-         * subset of the output variables from the model.
-         *
-         * @param out_var_names the names of variables in formulation output, in the order they should appear.
-         */
-        void set_output_variable_names(const vector<std::string> &out_var_names) {
-            output_variable_names = out_var_names;
         }
 
         /** The delta of the last model update execution (typically, this is time step size). */
@@ -857,11 +831,6 @@ namespace realization {
         /** Whether the backing model uses/reads the forcing file directly for getting input data. */
         bool bmi_using_forcing_file;
         std::string forcing_file_path;
-        /**
-         * Names of the variables to include in the output from this realization, which should be some ordered subset of
-         * the output variables from the model.
-         */
-        std::vector<std::string> output_variable_names;
         bool model_initialized = false;
 
         std::vector<std::string> OPTIONAL_PARAMETERS = {

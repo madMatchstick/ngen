@@ -14,6 +14,7 @@
 #include <ctime>
 #include <time.h>
 #include <memory>
+#include "AorcForcing.hpp"
 #include "ForcingProvider.hpp"
 #include <exception>
 
@@ -28,63 +29,6 @@
 #define AORC_FIELD_NAME_WIND_U_10M_AG "UGRD_10maboveground"
 #define AORC_FIELD_NAME_WIND_V_10M_AG "VGRD_10maboveground"
 #define AORC_FIELD_NAME_SPEC_HUMID_2M_AG "SPFH_2maboveground"
-
-// CSDMS Standard Names for several forcings
-#define CSDMS_STD_NAME_RAIN_RATE "atmosphere_water__rainfall_volume_flux"
-#define CSDMS_STD_NAME_SOLAR_LONGWAVE "land_surface_radiation~incoming~longwave__energy_flux"
-#define CSDMS_STD_NAME_SOLAR_SHORTWAVE "land_surface_radiation~incoming~shortwave__energy_flux"
-#define CSDMS_STD_NAME_SURFACE_AIR_PRESSURE "land_surface_air__pressure"
-#define CSDMS_STD_NAME_HUMIDITY "atmosphere_air_water~vapor__relative_saturation"
-#define CSDMS_STD_NAME_LIQUID_EQ_PRECIP_RATE "atmosphere_water__liquid_equivalent_precipitation_rate"
-#define CSDMS_STD_NAME_SURFACE_TEMP "land_surface_air__temperature"
-#define CSDMS_STD_NAME_WIND_U_X "land_surface_wind__x_component_of_velocity"
-#define CSDMS_STD_NAME_WIND_V_Y "land_surface_wind__y_component_of_velocity"
-
-using namespace std;
-
-/**
- * @brief forcing_params providing configuration information for forcing time period and source.
- */
-struct forcing_params
-{
-  std::string path;
-  std::string start_time;
-  std::string end_time;
-  std::string date_format =  "%Y-%m-%d %H:%M:%S";
-  time_t start_t;
-  time_t end_t;
-  /*
-    Constructor for forcing_params
-  */
-  forcing_params(std::string path, std::string start_time, std::string end_time):
-    path(path), start_time(start_time), end_time(end_time)
-    {
-      /// \todo converting to UTC can be tricky, especially if thread safety is a concern
-      /* https://stackoverflow.com/questions/530519/stdmktime-and-timezone-info */
-      struct tm tm;
-      strptime(this->start_time.c_str(), this->date_format.c_str() , &tm);
-      //mktime returns time in local time based on system timezone
-      //FIXME use timegm (not standard)? or implement timegm (see above link)
-      this->start_t = timegm( &tm );
-
-      strptime(this->end_time.c_str(), this->date_format.c_str() , &tm);
-      this->end_t = timegm( &tm );
-    }
-};
-
-//AORC Forcing Data Struct
-struct AORC_data
-{
-  double APCP_surface_kg_per_meters_squared; //Total Precipitation (kg/m^2)
-  double DLWRF_surface_W_per_meters_squared; //Downward Long-Wave Rad. (Flux W/m^2)
-  double DSWRF_surface_W_per_meters_squared; //Downward Short-Wave Radiation (Flux W/m^2)
-  double PRES_surface_Pa; //Pressure (Pa)
-  double SPFH_2maboveground_kg_per_kg; //Specific Humidity (kg/kg)
-  double TMP_2maboveground_K; //Temperature (K)
-  double UGRD_10maboveground_meters_per_second; //U-Component of Wind (m/s)
-  double VGRD_10maboveground_meters_per_second; //V-Component of Wind (m/s)
-};
-
 
 /**
  * @brief Forcing class providing time-series precipiation forcing data to the model.
@@ -166,17 +110,24 @@ class Forcing : public forcing::ForcingProvider
 
     const std::vector<std::string> &get_available_forcing_outputs() override {
         if (available_forcings.empty()) {
-            for (std::string forcing_name : *(Forcing::get_forcing_field_names())) {
+            std::vector<std::string> csdms_names = {
+                    CSDMS_STD_NAME_SOLAR_LONGWAVE,
+                    CSDMS_STD_NAME_SOLAR_SHORTWAVE,
+                    CSDMS_STD_NAME_SURFACE_AIR_PRESSURE,
+                    CSDMS_STD_NAME_HUMIDITY,
+                    CSDMS_STD_NAME_LIQUID_EQ_PRECIP_RATE,
+                    CSDMS_STD_NAME_SURFACE_TEMP,
+                    CSDMS_STD_NAME_WIND_U_X,
+                    CSDMS_STD_NAME_WIND_V_Y
+            };
+            auto aorc_field_names = Forcing::get_forcing_field_names();
+            available_forcings.reserve(aorc_field_names->size() + csdms_names.size());
+            for (const std::string &forcing_name : *aorc_field_names) {
                 available_forcings.push_back(forcing_name);
             }
-            available_forcings.push_back(CSDMS_STD_NAME_SOLAR_LONGWAVE);
-            available_forcings.push_back(CSDMS_STD_NAME_SOLAR_SHORTWAVE);
-            available_forcings.push_back(CSDMS_STD_NAME_SURFACE_AIR_PRESSURE);
-            available_forcings.push_back(CSDMS_STD_NAME_HUMIDITY);
-            available_forcings.push_back(CSDMS_STD_NAME_LIQUID_EQ_PRECIP_RATE);
-            available_forcings.push_back(CSDMS_STD_NAME_SURFACE_TEMP);
-            available_forcings.push_back(CSDMS_STD_NAME_WIND_U_X);
-            available_forcings.push_back(CSDMS_STD_NAME_WIND_V_Y);
+            for (const std::string &forcing_name : csdms_names) {
+                available_forcings.push_back(forcing_name);
+            }
         }
         return available_forcings;
     }
@@ -305,7 +256,7 @@ class Forcing : public forcing::ForcingProvider
             time_remaining -= ts_involved_s;
             current_index++;
         }
-        double value;
+        double value = 0;
         for (size_t i = 0; i < involved_time_step_values.size(); ++i) {
             if (is_param_sum_over_time_step(output_name))
                 value += involved_time_step_values[i] * ((double)involved_time_step_seconds[i] / 3600.0);
@@ -319,18 +270,7 @@ class Forcing : public forcing::ForcingProvider
      * Get the current value of a forcing param identified by its name.
      *
      * @param name The name of the forcing param for which the current value is desired.
-     * @return The particular param's current value.
-     */
-    inline double get_value_for_param_name(const std::string& name) {
-        check_forcing_vector_index_bounds();
-        return get_value_for_param_name(name, forcing_vector_index);
-    }
-
-    /**
-     * Get the current value of a forcing param identified by its name.
-     *
-     * @param name The name of the forcing param for which the current value is desired.
-     * @param name The applicable forcing time step index for which the value is desired.
+     * @param index The index of the desired forcing time step from which to obtain the value.
      * @return The particular param's value at the given forcing time step.
      */
     inline double get_value_for_param_name(const std::string& name, int index) {

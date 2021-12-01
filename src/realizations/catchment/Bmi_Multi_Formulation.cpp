@@ -1,5 +1,9 @@
 #include "Bmi_Multi_Formulation.hpp"
 #include "Formulation_Constructors.hpp"
+#include "Bmi_Formulation.hpp"
+#include <iostream>
+#include "Bmi_Py_Formulation.hpp"
+#include <WrappedForcingProvider.hpp>
 
 using namespace realization;
 
@@ -11,72 +15,83 @@ void Bmi_Multi_Formulation::create_multi_formulation(geojson::PropertyMap proper
     set_bmi_main_output_var(properties.at(BMI_REALIZATION_CFG_PARAM_REQ__MAIN_OUT_VAR).as_string());
     set_model_type_name(properties.at(BMI_REALIZATION_CFG_PARAM_REQ__MODEL_TYPE).as_string());
 
+    std::shared_ptr<forcing::WrappedForcingProvider> forcing_provider = std::make_shared<forcing::WrappedForcingProvider>(forcing.get());
+    for (const std::string &forcing_name_or_alias : forcing->get_available_forcing_outputs()) {
+        availableData[forcing_name_or_alias] = forcing_provider;
+    }
+
     // TODO: go back and set this up properly in required params collection
-    auto sub_formulation_it = properties.find(BMI_REALIZATION_CFG_PARAM_REQ__MODULES);
-    std::vector<geojson::JSONProperty> sub_formulations_list = sub_formulation_it->second.as_list();
-    modules = std::vector<std::shared_ptr<Bmi_Module_Formulation<bmi::Bmi>>>(sub_formulations_list.size());
+    auto nested_module_configs_it = properties.find(BMI_REALIZATION_CFG_PARAM_REQ__MODULES);
+    std::vector<geojson::JSONProperty> nested_module_configs = nested_module_configs_it->second.as_list();
+    // By default, have the "primary" module be the last
+    primary_module_index = nested_module_configs.size() - 1;
+    modules = std::vector<nested_module_ptr>(nested_module_configs.size());
+    module_types = std::vector<std::string>(nested_module_configs.size());
     module_variable_maps = std::vector<std::shared_ptr<std::map<std::string, std::string>>>(modules.size());
 
-    // TODO: move inner for loops to separate functions
     /* ************************ Begin outer loop: "for sub_formulations_list" ************************ */
-    for (size_t i = 0; i < sub_formulations_list.size(); ++i) {
-        geojson::JSONProperty formulation_config = sub_formulations_list[i];
+    for (size_t i = 0; i < nested_module_configs.size(); ++i) {
+        geojson::JSONProperty formulation_config = nested_module_configs[i];
         std::string type_name = formulation_config.at("name").as_string();
         std::string identifier = get_catchment_id() + "." + std::to_string(i);
-        std::shared_ptr<Bmi_Module_Formulation<bmi::Bmi>> module;
+        nested_module_ptr module = nullptr;
+        bool inactive_type_requested = false;
+        module_types[i] = type_name;
         if (type_name == "bmi_c") {
-            module = std::dynamic_pointer_cast<Bmi_Module_Formulation<bmi::Bmi>>(std::make_shared<Bmi_C_Formulation>(identifier, forcing, output));
+            #ifdef NGEN_BMI_C_LIB_ACTIVE
+            module = init_nested_module<Bmi_C_Formulation>(i, identifier, formulation_config.at("params").get_values());
+            #else  // NGEN_BMI_C_LIB_ACTIVE
+            inactive_type_requested = true;
+            #endif // NGEN_BMI_C_LIB_ACTIVE
         }
-        else {
+        if (type_name == "bmi_fortran") {
+
+            #ifdef NGEN_BMI_FORTRAN_ACTIVE
+            module = init_nested_module<Bmi_Fortran_Formulation>(i, identifier, formulation_config.at("params").get_values());
+            #else // NGEN_BMI_FORTRAN_ACTIVE
+            inactive_type_requested = true;
+            #endif // NGEN_BMI_FORTRAN_ACTIVE
+        }
+        if (type_name == "bmi_python") {
+            #ifdef ACTIVATE_PYTHON
+            module = init_nested_module<Bmi_Py_Formulation>(i, identifier, formulation_config.at("params").get_values());
+            #else // ACTIVATE_PYTHON
+            inactive_type_requested = true;
+            #endif // ACTIVATE_PYTHON
+        }
+        if (inactive_type_requested) {
+            throw runtime_error(
+                    get_formulation_type() + " could not initialize sub formulation of type " + type_name +
+                    " due to support for this type not being activated.");
+        }
+        if (module == nullptr) {
             throw runtime_error(get_formulation_type() + " received unexpected subtype formulation " + type_name);
         }
         modules[i] = module;
-        // Call create_formulation on each formulation
-        module->create_formulation(formulation_config.at("params").get_values());
 
-        // Set this up for placing in the module_variable_maps member variable
-        std::shared_ptr<std::map<std::string, std::string>> var_aliases;
-        var_aliases = std::make_shared<std::map<std::string, std::string>>(
-                std::map<std::string, std::string>());
-
-        for (const std::string &var_name : module->get_bmi_input_variables()) {
-            std::string framework_alias = module->get_config_mapped_variable_name(var_name);
-            (*var_aliases)[framework_alias] = var_name;
-            // If framework_name is not in collection from which we have available data sources ...
-            if (availableData.count(framework_alias) != 1) {
-                throw std::runtime_error(
-                        "Multi BMI cannot be created with module " + module->get_model_type_name() + " with input " +
-                        "variable " + framework_alias +
-                        (var_name == framework_alias ? "" : " (an alias of BMI variable " + var_name + ")") +
-                        " when there is no previously-enabled source for this input.");
-            }
-            else {
-                module->input_forcing_providers[var_name] = availableData[framework_alias];
-                module->input_forcing_providers[framework_alias] = availableData[framework_alias];
-            }
-        }
-        // Also add the output variable aliases
-        for (const std::string &var_name : module->get_bmi_output_variables()) {
-            std::string framework_alias = module->get_config_mapped_variable_name(var_name);
-            (*var_aliases)[framework_alias] = var_name;
-            if (availableData.count(framework_alias) > 0) {
-                throw std::runtime_error(
-                        "Multi BMI cannot be created with module " + module->get_model_type_name() +
-                        " with output variable " + framework_alias +
-                        (var_name == framework_alias ? "" : " (an alias of BMI variable " + var_name + ")") +
-                        " because a previous module is using this output variable name/alias.");
-            }
-            availableData[framework_alias] = module;
-        }
-        module_variable_maps[i] = var_aliases;
     } /* ************************ End outer loop: "for sub_formulations_list" ************************ */
 
     // TODO: get synced start_time values for all models
     // TODO: get synced end_time values for all models
 
-    // TODO: set up output_variables (add support for controlling the particular sub-formulation somehow)
-
-    // TODO: account for consistent setting of 'allow_exceed_end_time'
+    // Setup formulation output variable subset and order, if present
+    auto out_var_it = properties.find(BMI_REALIZATION_CFG_PARAM_OPT__OUT_VARS);
+    if (out_var_it != properties.end()) {
+        std::vector<geojson::JSONProperty> out_vars_json_list = out_var_it->second.as_list();
+        std::vector<std::string> out_vars(out_vars_json_list.size());
+        for (int i = 0; i < out_vars_json_list.size(); ++i) {
+            out_vars[i] = out_vars_json_list[i].as_string();
+        }
+        set_output_variable_names(out_vars);
+    }
+    // Otherwise, for multi BMI, the BMI output variables of the last nested module should be used.
+    else {
+        is_out_vars_from_last_mod = true;
+        set_output_variable_names(modules.back()->get_output_variable_names());
+    }
+    // TODO: consider warning if nested module formulations have formulation output variables, as that level of the
+    //  config is (at present) going to be ignored (though strictly speaking, this doesn't apply to the last module in
+    //  a certain case).
 
     // Output header fields, if present
     auto out_headers_it = properties.find(BMI_REALIZATION_CFG_PARAM_OPT__OUT_HEADER_FIELDS);
@@ -86,7 +101,15 @@ void Bmi_Multi_Formulation::create_multi_formulation(geojson::PropertyMap proper
         for (int i = 0; i < out_headers_json_list.size(); ++i) {
             out_headers[i] = out_headers_json_list[i].as_string();
         }
-        set_output_header_fields(out_headers);
+        // Make sure that we have the same number of headers as we have output values
+        if (get_output_variable_names().size() == out_headers.size()) {
+            set_output_header_fields(out_headers);
+        }
+        else {
+            std::cerr << "WARN: configured output headers have " << out_headers.size() << " fields, but there are "
+                      << get_output_variable_names().size() << " variables in the output" << std::endl;
+            set_output_header_fields(get_output_variable_names());
+        }
     }
     else {
         set_output_header_fields(get_output_variable_names());
@@ -109,16 +132,42 @@ void Bmi_Multi_Formulation::create_multi_formulation(geojson::PropertyMap proper
  * @return Whether a model may perform updates beyond its ``end_time``.
  */
 const bool &Bmi_Multi_Formulation::get_allow_model_exceed_end_time() const {
-    for (const std::shared_ptr<Bmi_Formulation>& m : modules) {
+    for (const nested_module_ptr &m : modules) {
         if (!m->get_allow_model_exceed_end_time())
             return m->get_allow_model_exceed_end_time();
     }
     return modules.back()->get_allow_model_exceed_end_time();
 }
 
+/**
+ * Get the collection of forcing output property names this instance can provide.
+ *
+ * For this type, this is the collection of the names/aliases of the BMI output variables for nested modules;
+ * i.e., the config-mapped alias for the variable when set in the realization config, or just the name when no
+ * alias was included in the configuration.
+ *
+ * This is part of the @ref ForcingProvider interface.  This interface must be implemented for items of this
+ * type to be usable as "forcing" providers for situations when some other object needs to receive as an input
+ * (i.e., one of its forcings) a data property output from this object.
+ *
+ * @return The collection of forcing output property names this instance can provide.
+ * @see ForcingProvider
+ */
+const vector<std::string> &Bmi_Multi_Formulation::get_available_forcing_outputs() {
+    if (is_model_initialized() && available_forcings.empty()) {
+        for (const nested_module_ptr &module: modules) {
+            for (const std::string &out_var_name: module->get_bmi_output_variables()) {
+                available_forcings.push_back(module->get_config_mapped_variable_name(out_var_name));
+            }
+        }
+    }
+    return available_forcings;
+}
+
 const time_t &Bmi_Multi_Formulation::get_bmi_model_start_time_forcing_offset_s() {
     return modules[0]->get_bmi_model_start_time_forcing_offset_s();
 }
+
 
 /**
  * When possible, translate a variable name for a BMI model to an internally recognized name.
@@ -140,7 +189,6 @@ const time_t &Bmi_Multi_Formulation::get_bmi_model_start_time_forcing_offset_s()
 const string &Bmi_Multi_Formulation::get_config_mapped_variable_name(const string &model_var_name) {
     return get_config_mapped_variable_name(model_var_name, true, true);
 }
-
 
 const string &Bmi_Multi_Formulation::get_config_mapped_variable_name(const string &model_var_name, bool check_first,
                                                                      bool check_last)
@@ -205,13 +253,69 @@ const string &Bmi_Multi_Formulation::get_config_mapped_variable_name(const strin
     return output_var_name;
 }
 
+// TODO: remove from this level - it belongs (perhaps) as part of the ForcingProvider interface, but is general to it
 const string &Bmi_Multi_Formulation::get_forcing_file_path() const {
-    // TODO: add something that ensures these are set to same path for all modules (allowing some to be unset also)
     return modules[0]->get_forcing_file_path();
 }
 
-const vector<std::string> &Bmi_Multi_Formulation::get_output_variable_names() const {
-    return modules.back()->get_output_variable_names();
+string Bmi_Multi_Formulation::get_output_line_for_timestep(int timestep, std::string delimiter) {
+    // TODO: have to do some figuring out to make sure this isn't ambiguous (i.e., same output var name from two modules)
+    // TODO: need to verify that output variable names are valid, or else warn and return default
+
+    // TODO: something must be added to store values if more than the current time step is wanted
+    // TODO: if such a thing is added, it should probably be configurable to turn it off
+    if (timestep != (next_time_step_index - 1)) {
+        throw std::invalid_argument("Only current time step valid when getting multi-module BMI formulation output");
+    }
+    std::string output_str;
+
+    // Start by first checking whether we are NOT just using the last module's values
+    // Doing it this way so that, if there is a problem with the config, we can later fall back to this method
+    if (!is_out_vars_from_last_mod) {
+        for (const std::string &out_var_name: get_output_variable_names()) {
+            auto output_data_provider_iter = availableData.find(out_var_name);
+            // If something unrecognized was requested to be in the formulation output ...
+            if (output_data_provider_iter == availableData.end()) {
+                // ... print warning ...
+                std::cerr << "WARN: unrecognized variable '" << out_var_name
+                          << "' configured for formulation output; reverting to default behavior for multi-BMI "
+                             "formulation type (using last module)";
+                output_str.clear();                 // ... clear any temporary output contents being staged ...
+                is_out_vars_from_last_mod = true;   // ... revert to default behavior (just use last nested module) ...
+                break;                              // ... and break out of this loop through out_var_names
+            }
+            else {
+                // TODO: right now, not a easy way to properly support an output coming from something other than a
+                //  nested formulation, so restrict this for now, but come back to improve things later.
+                try {
+                    std::shared_ptr <Bmi_Module_Formulation<bmi::Bmi>> nested_module =
+                            std::dynamic_pointer_cast < Bmi_Module_Formulation <
+                            bmi::Bmi >> (output_data_provider_iter->second);
+                    output_str += (output_str.empty() ? "" : ",") +
+                                  std::to_string(nested_module->get_var_value_as_double(out_var_name));
+                }
+                // Similarly, if there was any problem with the cast and extraction of the value, revert
+                catch (std::exception &e) {
+                    std::cerr << "WARN: variable '" << out_var_name
+                            << "' is not an expected output from a nest module of this multi-module BMI formulation"
+                               "; reverting to used of outputs from last module";
+                    output_str.clear();
+                    is_out_vars_from_last_mod = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Now, check this again (i.e., we could have either not entered the previous "if" block, or started it but then
+    // exited after a problem and needed to revert to this method)
+    if (!is_out_vars_from_last_mod) {
+        // If we are (still) not using vars from the last module, this means the last "if" has built the output
+        return output_str;
+    }
+    else {
+        return modules.back()->get_output_line_for_timestep(timestep, delimiter);
+    }
 }
 
 double Bmi_Multi_Formulation::get_response(time_step_t t_index, time_step_t t_delta) {
@@ -235,17 +339,66 @@ double Bmi_Multi_Formulation::get_response(time_step_t t_index, time_step_t t_de
                                     "step that exceeds model end time.");
     }
 
+    // We need to make sure we can safely move forward this far in time for all the modules
+    time_t initial_time_seconds, model_end_time_seconds, post_processing_time_seconds;
+    // I.e., "current" time step is one less than the "next" one
+    int num_time_steps_to_process = t_index - (next_time_step_index - 1);
+    // Also, we should only need this once, because the models should remain in sync (just use first module)
+    initial_time_seconds = modules[0]->convert_model_time(modules[0]->get_model_current_time());
+    post_processing_time_seconds = initial_time_seconds + (num_time_steps_to_process * t_delta);
+
+    for (nested_module_ptr &module : modules) {
+        // We are good for any that are allow to exceed end_time
+        if (module->get_allow_model_exceed_end_time()) {
+            continue;
+        }
+        model_end_time_seconds = module->convert_model_time(module->get_model_end_time());
+
+        if (post_processing_time_seconds > model_end_time_seconds) {
+            throw std::invalid_argument("Cannot process BMI multi-module formulation to get response of future time "
+                                        "step that exceeds model end time.");
+        }
+    }
+
     while (next_time_step_index <= t_index) {
-        for (size_t i = 0; i < modules.size(); ++i) {
+        for (nested_module_ptr &module : modules) {
             // By setting up in create function, these will now have their own providers
-            modules[i]->get_response(t_index, t_delta);
+            module->get_response(t_index, t_delta);
         }
         next_time_step_index++;
     }
-    // We know this safely ...
-    std::shared_ptr<Bmi_Module_Formulation<bmi::Bmi>> source = std::dynamic_pointer_cast<Bmi_Module_Formulation<bmi::Bmi>>(availableData[get_bmi_main_output_var()]);
-    // TODO: but we may need to add a convert step here in the case of mapping
-    return source->get_var_value_as_double(get_bmi_main_output_var());
+    // Find the right module for the main output, checking primary first
+    int index = get_index_for_primary_module();
+    std::vector<std::string> out_var_names = modules[index]->get_output_variable_names();
+    // If we don't find it there, look through the others
+    if (std::find(out_var_names.begin(), out_var_names.end(), get_bmi_main_output_var()) == out_var_names.end()) {
+        for (int i = 0; i < modules.size(); ++i) {
+            if (i == index) continue;
+            out_var_names = modules[i]->get_output_variable_names();
+            if (std::find(out_var_names.begin(), out_var_names.end(), get_bmi_main_output_var()) != out_var_names.end()) {
+                index = i;
+                break;
+            }
+        }
+    }
+    // With the module index, we can also pick the type
+    #ifdef NGEN_BMI_C_LIB_ACTIVE
+    if (module_types[index] == "bmi_c") {
+        return get_module_var_value_as_double<Bmi_C_Formulation>(get_bmi_main_output_var(), modules[index]);
+    }
+    #endif // NGEN_BMI_C_LIB_ACTIVE
+    #ifdef NGEN_BMI_FORTRAN_ACTIVE
+    if (module_types[index] == "bmi_fortran") {
+        return get_module_var_value_as_double<Bmi_Fortran_Formulation>(get_bmi_main_output_var(), modules[index]);
+    }
+    #endif // NGEN_BMI_FORTRAN_ACTIVE
+    #ifdef ACTIVATE_PYTHON
+    if (module_types[index] == "bmi_python") {
+        return get_module_var_value_as_double<Bmi_Py_Formulation>(get_bmi_main_output_var(), modules[index]);
+    }
+    #endif // ACTIVATE_PYTHON
+    throw runtime_error(get_formulation_type() + " unimplemented type " + module_types[index] +
+                        " in get_response for main return value");
 }
 
 bool Bmi_Multi_Formulation::is_bmi_input_variable(const string &var_name) {

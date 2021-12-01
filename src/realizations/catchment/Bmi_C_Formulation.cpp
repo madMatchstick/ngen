@@ -1,13 +1,10 @@
 #include "Bmi_C_Formulation.hpp"
-
+#include <ForcingProvider.hpp>
 using namespace realization;
 using namespace models::bmi;
 
-Bmi_C_Formulation::Bmi_C_Formulation(std::string id, Forcing forcing, utils::StreamHandler output_stream)
-        : Bmi_Module_Formulation<models::bmi::Bmi_C_Adapter>(id, forcing, output_stream) { }
-
-Bmi_C_Formulation::Bmi_C_Formulation(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream)
-    : Bmi_Module_Formulation<models::bmi::Bmi_C_Adapter>(id, forcing_config, output_stream) { }
+Bmi_C_Formulation::Bmi_C_Formulation(std::string id, std::unique_ptr<forcing::ForcingProvider> forcing_provider, utils::StreamHandler output_stream)
+    : Bmi_Module_Formulation<models::bmi::Bmi_C_Adapter>(id, std::move(forcing_provider), output_stream) { }
 
 std::string Bmi_C_Formulation::get_formulation_type() {
     return "bmi_c";
@@ -30,26 +27,14 @@ std::shared_ptr<Bmi_C_Adapter> Bmi_C_Formulation::construct_model(const geojson:
             reg_func_itr == properties.end() ? BMI_C_DEFAULT_REGISTRATION_FUNC : reg_func_itr->second.as_string();
     return std::make_shared<Bmi_C_Adapter>(
             Bmi_C_Adapter(
+                    get_model_type_name(),
                     lib_file,
                     get_bmi_init_config(),
-                    get_forcing_file_path(),
-                    is_bmi_using_forcing_file(),
+                    (is_bmi_using_forcing_file() ? get_forcing_file_path() : ""),
                     get_allow_model_exceed_end_time(),
                     is_bmi_model_time_step_fixed(),
                     reg_func,
                     output));
-}
-
-time_t Bmi_C_Formulation::convert_model_time(const double &model_time) {
-    return (time_t) (get_bmi_model()->convert_model_time_to_seconds(model_time));
-}
-
-const vector<string> Bmi_C_Formulation::get_bmi_input_variables() {
-    return get_bmi_model()->GetInputVarNames();
-}
-
-const vector<string> Bmi_C_Formulation::get_bmi_output_variables() {
-    return get_bmi_model()->GetOutputVarNames();
 }
 
 std::string Bmi_C_Formulation::get_output_header_line(std::string delimiter) {

@@ -1,7 +1,29 @@
 #include "network.hpp"
 #include <boost/graph/topological_sort.hpp>
+#include <stdexcept>
+#include <boost/graph/reverse_graph.hpp>
+#include <boost/graph/graph_utility.hpp>
 
 using namespace network;
+
+/*
+template < typename OutputIterator >
+struct preorder_visitor : public boost::dfs_visitor<>
+{
+    template < typename Edge, typename Graph >
+    void back_edge(const Edge&, Graph&)
+    {
+        BOOST_THROW_EXCEPTION(boost::not_a_dag());
+    }
+
+    template < typename Vertex, typename Graph >
+    void discover_vertex(const Vertex& u, Graph&)
+    {
+        this->m_iter++ = u;
+        std::cerr << "discover_vertex " << u << std::endl;
+    }
+};
+*/
 
 Network::Network( geojson::GeoJSON fabric ){
 
@@ -121,6 +143,10 @@ IndexPair Network::tailwaters(){
 }
 
 std::string Network::get_id( Graph::vertex_descriptor idx){
+  if( idx < 0 || idx >= num_vertices(this->graph) )
+  {
+    throw std::invalid_argument( std::string("Network::get_id: No vertex descriptor "+std::to_string(idx)+" in network."));
+  }
   return get(boost::vertex_name, this->graph)[idx];
 }
 
@@ -150,3 +176,22 @@ std::vector<std::string> Network::get_destination_ids(std::string id){
 
   return ids;
 }
+
+const NetworkIndexT& Network::get_sorted_index(SortOrder order, bool cache){
+  if (order == SortOrder::TransposedDepthFirstPreorder) {
+    if (!this->tdfp_order.empty()){
+      return this->tdfp_order;
+    }
+    
+    //TODO: change behavior for cache == false... don't mutate.
+    auto r = make_reverse_graph(this->graph);
+    df_preorder_sort(r , std::back_inserter(this->tdfp_order),
+                    boost::vertex_index_map(get(boost::vertex_index, this->graph)));
+
+    return this->tdfp_order;
+  } else {
+    // we know this has already been cached by the constructor
+    return this->topo_order;
+  }
+}
+

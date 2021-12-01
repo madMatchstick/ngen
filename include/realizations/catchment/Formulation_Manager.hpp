@@ -47,6 +47,9 @@ namespace realization {
             virtual ~Formulation_Manager(){};
 
             virtual void read(geojson::GeoJSON fabric, utils::StreamHandler output_stream) {
+                //TODO seperate the parsing of configuration options like time
+                //and routing and other non feature specific tasks from this main function
+                //which has to iterate the entire hydrofabric.
                 auto possible_global_config = tree.get_child_optional("global");
 
                 if (possible_global_config) {
@@ -127,13 +130,20 @@ namespace realization {
                 auto possible_routing_configs = tree.get_child_optional("routing");
                 
                 if (possible_routing_configs) {
+                    //Since it is possible to build NGEN without routing support, if we see it in the config
+                    //but it isn't enabled in the build, we should at least put up a warning
+                #ifdef NGEN_ROUTING_ACTIVE
                     geojson::JSONProperty routing_parameters("routing", *possible_routing_configs);
                     
                     this->routing_config = std::make_shared<routing_params>(
-                        routing_parameters.at("t_route_connection_path").as_string(),
-                        routing_parameters.at("input_path").as_string()
+                        routing_parameters.at("t_route_config_file_with_path").as_string()
                     );
                     using_routing = true;
+                #else
+                    using_routing = false;
+                    std::cerr<<"WARNING: Formulation Manager found routing configuration"
+                             <<", but routing support isn't enabled. No routing will occur."<<std::endl;
+                #endif //NGEN_ROUTING_ACTIVE
                  }
 
                 /**
@@ -224,17 +234,13 @@ namespace realization {
             }
 
             /**
-             * @return routing t_route_connection_path
+             * @return routing t_route_config_file_with_path
              */
-            std::string get_t_route_connection_path() {
-                return this->routing_config->t_route_connection_path;
-            }
-
-            /**
-             * @return routing input_path
-             */
-            std::string get_input_path() {
-                return this->routing_config->input_path;
+            std::string get_t_route_config_file_with_path() {
+                if(this->routing_config != nullptr)
+                    return this->routing_config->t_route_config_file_with_path;
+                else
+                    return "";
             }
 
 
@@ -285,8 +291,15 @@ namespace realization {
                     throw std::runtime_error(message);
                 }
 
+                std::string provider = "";
+                if(forcing_parameters.has_key("provider")){
+                    provider = forcing_parameters.at("provider").as_string();
+                } else if(this->global_forcing.count("provider") != 0){
+                    provider = global_forcing.at("provider").as_string();
+                }
                 forcing_params forcing_config(
                     forcing_parameters.at("path").as_string(),
+                    provider,
                     simulation_time_config.start_time,
                     simulation_time_config.end_time
                 );
@@ -303,16 +316,25 @@ namespace realization {
                 forcing_params forcing_config = this->get_global_forcing_params(identifier, simulation_time_config);
 
                 std::shared_ptr<Catchment_Formulation> missing_formulation = construct_formulation(formulation_type_key, identifier, forcing_config, output_stream);
-                missing_formulation->create_formulation(this->global_formulation_parameters);
+                // Need to work with a copy, since it is altered in-place
+                geojson::PropertyMap global_properties_copy = global_formulation_parameters;
+                Catchment_Formulation::config_pattern_substitution(global_properties_copy,
+                                                                   BMI_REALIZATION_CFG_PARAM_REQ__INIT_CONFIG, "{{id}}",
+                                                                   identifier);
+                missing_formulation->create_formulation(global_properties_copy);
                 return missing_formulation;
             }
 
             forcing_params get_global_forcing_params(std::string identifier, simulation_time_params &simulation_time_config) {
                 std::string path = this->global_forcing.at("path").as_string();
-                
+                std::string provider = "";
+                if(this->global_forcing.count("provider") != 0){
+                    provider = global_forcing.at("provider").as_string();
+                }
                 if (this->global_forcing.count("file_pattern") == 0) {
                     return forcing_params(
                         path,
+                        provider,
                         simulation_time_config.start_time,
                         simulation_time_config.end_time
                     );
@@ -346,8 +368,45 @@ namespace realization {
 
                 // Attempt to open the directory for evaluation
                 directory = opendir(path.c_str());
+                // Allow for a few retries in certain failure situations
+                size_t attemptCount = 0;
+                std::string errMsg;
+                while (directory == nullptr && attemptCount++ < 5) {
+                    // For several error codes, we should break immediately and not retry
+                    if (errno == ENOENT) {
+                        errMsg = "No such file or directory.";
+                        break;
+                    }
+                    if (errno == ENXIO) {
+                        errMsg = "No such device or address.";
+                        break;
+                    }
+                    if (errno == EACCES) {
+                        errMsg = "Permission denied.";
+                        break;
+                    }
+                    if (errno == EPERM) {
+                        errMsg = "Operation not permitted.";
+                        break;
+                    }
+                    if (errno == ENOTDIR) {
+                        errMsg = "File at provided path is not a directory.";
+                        break;
+                    }
+                    if (errno == EMFILE) {
+                        errMsg = "The current process has too many open files.";
+                        break;
+                    }
+                    if (errno == ENFILE) {
+                        errMsg = "The system has too many open files.";
+                        break;
+                    }
+                    sleep(2);
+                    directory = opendir(path.c_str());
+                    errMsg = "Received system error number " + std::to_string(errno);
+                }
 
-                // If the directory could be found, we can go ahead and iterate
+                // If the directory could be found and opened, we can go ahead and iterate
                 if (directory != nullptr) {
                     while ((entry = readdir(directory))) {
                         // If the entry is a regular file or symlink AND the name matches the pattern, 
@@ -355,6 +414,7 @@ namespace realization {
                         if ((entry->d_type == DT_REG or entry->d_type == DT_LNK) and std::regex_match(entry->d_name, pattern)) {
                             return forcing_params(
                                 path + entry->d_name,
+                                provider,
                                 simulation_time_config.start_time,
                                 simulation_time_config.end_time
                             );
@@ -362,8 +422,8 @@ namespace realization {
                     }
                 }
                 else {
-                    // The directory wasn't found; forcing data cannot be retrieved
-                    throw std::runtime_error("No directory for forcing data was found at: " + path);
+                    // The directory wasn't found or otherwise couldn't be opened; forcing data cannot be retrieved
+                    throw std::runtime_error("Error opening forcing data dir '" + path + "' after " + std::to_string(attemptCount) + " attempts: " + errMsg);
                 }
 
                 closedir(directory);

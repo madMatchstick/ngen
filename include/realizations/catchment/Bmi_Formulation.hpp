@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <memory>
 #include "Catchment_Formulation.hpp"
 #include "ForcingProvider.hpp"
 
@@ -17,11 +18,13 @@
 // Then the optional
 #define BMI_REALIZATION_CFG_PARAM_OPT__FORCING_FILE "forcing_file"
 #define BMI_REALIZATION_CFG_PARAM_OPT__VAR_STD_NAMES "variables_names_map"
+// TODO: change this (and output_header_fields) to something like output_file_variables to distinguish from BMI output variables
 #define BMI_REALIZATION_CFG_PARAM_OPT__OUT_VARS "output_variables"
 #define BMI_REALIZATION_CFG_PARAM_OPT__OUT_HEADER_FIELDS "output_header_fields"
 #define BMI_REALIZATION_CFG_PARAM_OPT__ALLOW_EXCEED_END "allow_exceed_end_time"
 #define BMI_REALIZATION_CFG_PARAM_OPT__FIXED_TIME_STEP "fixed_time_step"
 #define BMI_REALIZATION_CFG_PARAM_OPT__LIB_FILE "library_file"
+#define BMI_REALIZATION_CFG_PARAM_OPT__PYTHON_TYPE_NAME "python_type"
 #define BMI_REALIZATION_CFG_PARAM_OPT__REGISTRATION_FUNC "registration_function"
 
 // Supported Standard Names for BMI variables
@@ -30,8 +33,8 @@
 
 // Taken from the CSDMS Standard Names list
 // TODO: need to add these in for anything BMI model input or output variables we need to know how to recognize
-#define CSDMS_STD_NAME_RAIN_RATE "atmosphere_water__rainfall_volume_flux"
 #define CSDMS_STD_NAME_POTENTIAL_ET "water_potential_evaporation_flux"
+/* *************** See also the Forcing.h file for several CSDMS Standard Names definitions *************** */
 
 // Forward declaration to provide access to protected items in testing
 class Bmi_Formulation_Test;
@@ -49,22 +52,31 @@ namespace realization {
 
     public:
 
-        // TODO: probably need to adjust this to let the forcing param (and backing member) be a shared pointer
-        Bmi_Formulation(std::string id, Forcing forcing, utils::StreamHandler output_stream)
-                : Catchment_Formulation(std::move(id), forcing, output_stream) { };
-
         /**
          * Minimal constructor for objects initialize using the Formulation_Manager and subsequent calls to
          * ``create_formulation``.
          *
          * @param id
-         * @param forcing_config
+         * @param forcing
          * @param output_stream
          */
-        Bmi_Formulation(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream)
-        : Catchment_Formulation(std::move(id), std::move(forcing_config), output_stream) { };
+        Bmi_Formulation(std::string id, std::unique_ptr<forcing::ForcingProvider> forcing, utils::StreamHandler output_stream)
+                : Catchment_Formulation(std::move(id), std::move(forcing), output_stream) { };
+
 
         virtual ~Bmi_Formulation() {};
+
+        /**
+         * Convert a time value from the model to an epoch time in seconds.
+         *
+         * Model time values are typically (though not always) 0-based totals count upward as time progresses.  The
+         * units are not necessarily seconds.  This performs the necessary lookup and conversion for such units, and
+         * then shifts the value appropriately for epoch time representation.
+         *
+         * @param model_time
+         * @return
+         */
+        virtual time_t convert_model_time(const double &model_time) = 0;
 
         /**
          * Get whether a model may perform updates beyond its ``end_time``.
@@ -101,6 +113,20 @@ namespace realization {
          */
         virtual const std::string &get_config_mapped_variable_name(const std::string &model_var_name) = 0;
 
+        /**
+         * Get the current time for the backing BMI model in its native format and units.
+         *
+         * @return The current time for the backing BMI model in its native format and units.
+         */
+        virtual const double get_model_current_time() = 0;
+
+        /**
+         * Get the end time for the backing BMI model in its native format and units.
+         *
+         * @return The end time for the backing BMI model in its native format and units.
+         */
+        virtual const double get_model_end_time() = 0;
+
         virtual const string &get_forcing_file_path() const = 0;
 
         /**
@@ -122,14 +148,29 @@ namespace realization {
         }
 
         /**
+         * Get a header line appropriate for a file made up of entries from this type's implementation of
+         * ``get_output_line_for_timestep``.
+         *
+         * Note that like the output generating function, this line does not include anything for time step.
+         *
+         * @return An appropriate header line for this type.
+         */
+        string get_output_header_line(string delimiter) override {
+            return boost::algorithm::join(get_output_header_fields(), delimiter);
+        }
+
+        /**
          * Get the names of variables in formulation output.
          *
          * Get the names of the variables to include in the output from this formulation, which should be some ordered
-         * subset of the output variables from the model.
+         * subset of the BMI module output variables accessible to this instance.
          *
          * @return
          */
-        virtual const vector<std::string> &get_output_variable_names() const = 0;
+        // TODO: rename this function to make it more clear it is FORMULATION output contents, not simply BMI variables
+        const vector<string> &get_output_variable_names() const {
+            return output_variable_names;
+        }
 
         const vector<std::string> &get_required_parameters() override {
             return REQUIRED_PARAMETERS;
@@ -179,6 +220,18 @@ namespace realization {
             output_header_fields = output_headers;
         }
 
+        /**
+         * Set the names of variables in formulation output.
+         *
+         * Set the names of the variables to include in the output from this formulation, which should be some ordered
+         * subset of the output variables from the model.
+         *
+         * @param out_var_names the names of variables in formulation output, in the order they should appear.
+         */
+        void set_output_variable_names(const vector<string> &out_var_names) {
+            output_variable_names = out_var_names;
+        }
+
     private:
 
         std::string bmi_main_output_var;
@@ -188,6 +241,11 @@ namespace realization {
          * `output_variable_names`.
          */
         std::vector<std::string> output_header_fields;
+        /**
+         * Names of the variables to include in the output from this formulation, which will be some ordered subset of
+         * the BMI module output variables accessible to the instance.
+         */
+        std::vector<std::string> output_variable_names;
 
         std::vector<std::string> OPTIONAL_PARAMETERS = {
                 BMI_REALIZATION_CFG_PARAM_OPT__FORCING_FILE,

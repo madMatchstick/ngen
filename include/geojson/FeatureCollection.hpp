@@ -10,6 +10,7 @@
 #include <exception>
 #include <memory>
 #include <algorithm>
+#include <unordered_set>
 
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
@@ -20,7 +21,7 @@ namespace geojson {
             /**
              * Constructor
              * 
-             * @param features An overall list of features
+             * @param new_features An overall list of features
              * @param bounding_box A set of bounds for all features
              */
             FeatureCollection(FeatureList &new_features, std::vector<double> bounding_box) : bounding_box(bounding_box)
@@ -42,6 +43,30 @@ namespace geojson {
                 for (Feature feature : feature_collection) {
                     features.push_back(feature);
                 }
+                this->update_ids();
+            }
+
+            /**
+             * Copy constructor with filter
+             * 
+             * @param feature_collection The FeatureCollection to copy
+             * @param filter A container 
+             */
+            template<typename C>
+            FeatureCollection(const FeatureCollection &feature_collection, C& filter) {
+                bounding_box = feature_collection.get_bounding_box();
+                std::unordered_set<std::string> idset;
+                for (auto it = std::begin(filter); it != std::end(filter); ++it )
+                {
+                    idset.insert(*it);
+                }
+                for (Feature feature : feature_collection) {
+                    auto id = feature->get_id();
+                    if (idset.count(id)) {
+                        features.push_back(feature);
+                    }
+                }
+                this->update_ids();
             }
 
             /**
@@ -152,6 +177,30 @@ namespace geojson {
             int link_features_from_property(std::string* from_property = nullptr, std::string* to_property = nullptr);
 
             int link_features_from_attribute(std::string* from_attribute = nullptr, std::string* to_attribute = nullptr);
+
+            /* Untested, excluded for now in favor of filter constructor above.
+            template<typename C>
+            void filter(C& ids)
+            {
+                std::unordered_set<std::string> idset;
+                for (auto it = std::begin(ids); it != std::end(ids); ++it )
+                {
+                    idset.insert(*it);
+                }
+                std::unordered_set<std::string> ids_to_remove;
+                for (Feature feature : features) 
+                {
+                    auto id = feature->get_id();
+                    if(!idset.count(id)) ids_to_remove.insert(id);
+                }
+                // Finally, actually delete them...
+                for (auto id : ids_to_remove)
+                {
+                    remove_feature_by_id(id);
+                }
+            }
+            */
+
         private:
             FeatureList features;
             std::vector<double> bounding_box;

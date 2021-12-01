@@ -7,16 +7,49 @@
 #include "Et_Accountable.hpp"
 #include <HY_CatchmentArea.hpp>
 
+#include <Forcing.h> // Remove when _link_legacy_forcing() is removed!
+
 namespace realization {
 
     class Catchment_Formulation : public Formulation, public HY_CatchmentArea, public Et_Accountable {
         public:
-            Catchment_Formulation(std::string id, Forcing forcing, utils::StreamHandler output_stream)
-                : Formulation(id), HY_CatchmentArea(forcing, output_stream) { };
-
-            Catchment_Formulation(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream) : Formulation(id), HY_CatchmentArea(forcing_config, output_stream) {};
+            Catchment_Formulation(std::string id, std::unique_ptr<forcing::ForcingProvider> forcing, utils::StreamHandler output_stream)
+                : Formulation(id), HY_CatchmentArea(std::move(forcing), output_stream) { };
 
             Catchment_Formulation(std::string id) : Formulation(id){};
+
+        /**
+         * Perform in-place substitution on the given config property item, if the item and the pattern are present.
+         *
+         * Any and all instances of the substring ``pattern`` are replaced by ``replacement``, if ``key`` maps to a
+         * present string-type property value.
+         *
+         * @param properties A reference to the properties config object to be altered.
+         * @param key The key for the configuration property to potentially adjust.
+         * @param pattern The pattern substring to search for that, when present, should be replaced.
+         * @param replacement The replacement substring to potentially insert.
+         */
+        static void config_pattern_substitution(geojson::PropertyMap &properties, const std::string &key,
+                                                const std::string &pattern, const std::string &replacement) {
+            auto it = properties.find(key);
+            // Do nothing and return if either the key isn't found or the associated property isn't a string
+            if (it == properties.end() || it->second.get_type() != geojson::PropertyType::String) {
+                return;
+            }
+
+            std::string value = it->second.as_string();
+            size_t id_index = value.find(pattern);
+
+            if (id_index != std::string::npos) {
+                do {
+                    value = value.replace(id_index, sizeof(pattern.c_str()) - 2, replacement);
+                    id_index = value.find(pattern);
+                } while (id_index != std::string::npos);
+
+                properties.erase(key);
+                properties.emplace(key, geojson::JSONProperty(key, value));
+            }
+        }
 
             /**
              * Get a header line appropriate for a file made up of entries from this type's implementation of
@@ -44,12 +77,12 @@ namespace realization {
              * @param d_delta_s The duration, in seconds, of the time step for which to run model calculations.
              * @return The response output of the model for this time step.
              */
-            virtual double get_response(time_step_t t_index, time_step_t t_delta) = 0;
+            double get_response(time_step_t t_index, time_step_t t_delta) override = 0;
 
-            virtual const std::vector<std::string>& get_required_parameters() = 0;
+            const std::vector<std::string>& get_required_parameters() override = 0;
 
-            virtual void create_formulation(boost::property_tree::ptree &config, geojson::PropertyMap *global = nullptr) = 0;
-            virtual void create_formulation(geojson::PropertyMap properties) = 0;
+            void create_formulation(boost::property_tree::ptree &config, geojson::PropertyMap *global = nullptr) override = 0;
+            void create_formulation(geojson::PropertyMap properties) override = 0;
             virtual ~Catchment_Formulation(){};
 
     protected:
@@ -59,6 +92,15 @@ namespace realization {
 
         void set_catchment_id(std::string cat_id) override {
             id = cat_id;
+        }
+
+        //TODO: VERY BAD JUJU...the following two members are an ugly hack to avoid having to gut the legacy C/C++ realizations for now.
+        Forcing legacy_forcing;
+        // Use this a a deprecation chokepoint to get rid of Forcing when ready.
+        void _link_legacy_forcing()
+        {
+            void* f { this->forcing.get() };
+            legacy_forcing = *((Forcing *)f);
         }
     };
 }

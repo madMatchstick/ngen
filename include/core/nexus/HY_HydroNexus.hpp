@@ -22,6 +22,7 @@ class HY_HydroNexus
     using HydroLocation = std::shared_ptr<HY_HydroLocation>;
 
     HY_HydroNexus(std::string nexus_id, Catchments receiving_catchments);
+    HY_HydroNexus(std::string nexus_id, Catchments receiving_catchments, Catchments contributing_catchments);
     HY_HydroNexus(std::string nexus_id, HydroLocation location, Catchments receiving_catchments, Catchments contributing_catchments);
 
     virtual ~HY_HydroNexus();
@@ -42,6 +43,10 @@ class HY_HydroNexus
     
     const Catchments& get_receiving_catchments() {
         return receiving_catchments;
+    }
+
+    const Catchments& get_contributing_catchments() {
+    return contributing_catchments;
     }
 
     std::string& get_id() { return id; }

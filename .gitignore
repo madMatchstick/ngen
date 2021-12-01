@@ -93,6 +93,8 @@ Makefile
 CMakeFiles
 CMakeCache.txt
 *.cmake
+# Specifically adding this to cover a symlink pointing to an alternate dir
+/cmake-build-debug
 
 # Static Headers
 include/bmi.hpp
@@ -105,7 +107,24 @@ temp/
 extern/pybind11/
 # libtorch source artifact
 extern/libtorch-*.zip
-# Prototype Shared Library Example Build Directory
-extern/cfe/cmake_cfe_lib
-# Alt-modular build dir
-extern/alt-modular/cmake_am_libs
+# "Standard" build directories for external BMI module shared libraries
+extern/**/cmake_build
+
+# Large Example Datasets for certain tests #
+############################################
+# HUC01 Demo Testing Forcing Data
+data/forcing/huc01_demo/
+# HUC01 Demo Testing Hydrofabric
+data/hydrofabric/huc01_demo/
+
+# NGen build-related items
+.venv
+boost_*
+include/NGenConfig.h
+
+# Large Example Datasets for certain tests #
+############################################
+# HUC01 Demo Testing Forcing Data
+data/forcing/huc01_demo/
+# HUC01 Demo Testing Hydrofabric
+data/hydrofabric/huc01_demo/

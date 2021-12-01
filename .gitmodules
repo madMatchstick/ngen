@@ -1,14 +1,28 @@
 [submodule "test/googletest"]
 	path = test/googletest
 	url = https://github.com/google/googletest
-[submodule "extern/alt-modular/alt-modular"]
-	path = extern/alt-modular/alt-modular
-	url = git@github.com:NOAA-OWP/alt-modular.git
-	branch = main
+	ignore = dirty # So the generated folder doesn't show up in git status
 [submodule "extern/pybind11"]
 	path = extern/pybind11
 	url = https://github.com/pybind/pybind11
 [submodule "extern/t-route"]
 	path = extern/t-route
 	url = https://github.com/jdmattern-noaa/t-route.git
-        branch = ngen-routing
+  branch = ngen-routing2
+[submodule "extern/cfe/cfe"]
+	path = extern/cfe/cfe
+	url = https://github.com/NOAA-OWP/cfe.git
+	branch = master
+[submodule "extern/topmodel/topmodel"]
+	path = extern/topmodel/topmodel
+	url = https://github.com/NOAA-OWP/topmodel.git
+	branch = master
+[submodule "extern/noah-mp-modular/noah-mp-modular"]
+	path = extern/noah-mp-modular/noah-mp-modular
+	url = https://github.com/noaa-owp/noah-mp-modular
+	branch = main
+[submodule "extern/UDUNITS-2"]
+	path = extern/UDUNITS-2
+	url = https://github.com/Unidata/UDUNITS-2.git
+	ignore = dirty
+

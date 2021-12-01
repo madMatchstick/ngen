@@ -197,6 +197,44 @@ TEST_P(Network_Test1, TestNetworkTopologicalIndex)
   }
 }
 
+TEST_P(Network_Test1, TestNetwork_get_id)
+{
+  //Test valid vertex descriptors
+  ASSERT_TRUE( n.get_id(0) == "cat-0" );
+  ASSERT_TRUE( n.get_id(1) == "nex-0" );
+  ASSERT_TRUE( n.get_id(2) == "cat-1" );
+}
+
+TEST_P(Network_Test1, TestNetwork_get_id_1)
+{
+  //Test an invalid vertex descriptor
+  int idx = 100;
+  try {
+    n.get_id(idx);
+    FAIL();
+  } catch( std::invalid_argument const & ex ){
+    EXPECT_EQ(ex.what(), std::string("Network::get_id: No vertex descriptor "+std::to_string(idx)+" in network."));
+  }
+  catch(...){
+    FAIL() << "Expected std::invalid_argument";
+  }
+}
+
+TEST_P(Network_Test1, TestNetwork_get_id_2)
+{
+  //Test an invalid vertex descriptor on the edge of the valid range
+  int idx = 3;
+  try {
+    n.get_id(idx);
+    FAIL();
+  } catch( std::invalid_argument const & ex ){
+    EXPECT_EQ(ex.what(), std::string("Network::get_id: No vertex descriptor "+std::to_string(idx)+" in network."));
+  }
+  catch(...){
+    FAIL() << "Expected std::invalid_argument";
+  }
+}
+
 /*  A nice example of how to disable a test
 TEST_P(Network_Test1, DISABLED_TestInit1)
 {
@@ -254,20 +292,20 @@ TEST_F(Network_Test2, test_get_destination_ids2)
 TEST_F(Network_Test2, test_catchments_filter)
 {
   //This order IS IMPORTANT, it should be the topological order of catchments.  Note that the order isn't
-  //guaranteed on the leafs, the only guarantee for this test is that cat-2 comes after all the other catchments...
-  std::vector<std::string> expected_topo_order = {"cat-4",  "cat-3",  "cat-1", "cat-0", "cat-2"};
-  auto expected_it = expected_topo_order.begin();
+  //guaranteed on the leafs, the only guarantees for this test is that cat-2 comes after both cat-0 and cat-1.
+  //Technically, this is a valid topological order: cat-0, cat-3, cat-1, cat-4, cat-2 ...though unlikely.
   auto catchments = n.filter("cat");
-  auto catchments_it = catchments.begin();
+  //auto catchments_it = catchments.begin();
   for(const auto& id : n) std::cout<<"topo_id: "<<n.get_id(id)<<std::endl;
-  for(const auto& id : n.filter("cat")) std::cout<<"id: "<<id<<std::endl;
-  while( expected_it != expected_topo_order.end() && catchments_it != catchments.end() )
-  {
-    std::cout<<*expected_it<<" == "<<*catchments_it<<std::endl;
-    ASSERT_TRUE( *expected_it == *catchments_it );
-    ++expected_it;
-    ++catchments_it;
-  }
+  for(const auto& id : catchments) std::cout<<"id: "<<id<<std::endl;
+  auto cat0_it = std::find(catchments.begin(), catchments.end(), "cat-0");
+  auto cat1_it = std::find(catchments.begin(), catchments.end(), "cat-1");
+  auto cat2_it = std::find(catchments.begin(), catchments.end(), "cat-2");
+  std::cout << "cat-0 to cat-2 distance: " << std::distance(cat0_it, cat2_it) << std::endl;
+  std::cout << "cat-1 to cat-2 distance: " << std::distance(cat1_it, cat2_it) << std::endl;
+  ASSERT_TRUE( std::distance(cat0_it, cat2_it) > 0);
+  ASSERT_TRUE( std::distance(cat1_it, cat2_it) > 0);
+  ASSERT_TRUE( cat2_it != catchments.end() );
 }
 
 TEST_F(Network_Test2, test_nexus_filter)
@@ -292,3 +330,28 @@ TEST_F(Network_Test2, test_bad_filter)
   auto results = n.filter("fs");
   ASSERT_TRUE( results.begin() == results.end() );
 }
+
+TEST_F(Network_Test2, test_dfr_filter)
+{
+  for(const auto& id : n) std::cout<<"topo_id: "<<n.get_id(id)<<std::endl;
+
+  //This order IS IMPORTANT, it should be a pre-order depth-first traversal. So, cat-0 and cat-1
+  // should appear *immediately* after cat-2, though the order of cat-0 and cat-1 is undefined.
+  // Likewise the order of cat-2 vis-a-vis cat-3 and cat-4 are undefined because they are the same
+  // tree level.
+  auto catchments = n.filter("cat", network::SortOrder::TransposedDepthFirstPreorder);
+  //for(const auto& id : catchments) std::cout<<"id: "<<id<<std::endl;
+
+  auto cat0_it = std::find(catchments.begin(), catchments.end(), "cat-0");
+  auto cat1_it = std::find(catchments.begin(), catchments.end(), "cat-1");
+  auto cat2_it = std::find(catchments.begin(), catchments.end(), "cat-2");
+  int c2c0dist = std::distance(cat2_it, cat0_it);
+  int c2c1dist = std::distance(cat2_it, cat1_it);
+  std::cout << "cat-2 to cat-0 distance: " << c2c0dist << std::endl;
+  std::cout << "cat-2 to cat-1 distance: " << c2c1dist << std::endl;
+  ASSERT_TRUE( c2c0dist > 0 && c2c0dist <= 2);
+  ASSERT_TRUE( c2c1dist > 0 && c2c1dist <= 2);
+  // Not necessary, but interesting that this somehow causes get_id to be called with an invalid index. ??!?
+  //ASSERT_FALSE( std::distance(cat0_it, cat2_it) > 0 );
+}
+

@@ -1,28 +1,35 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12)
 
 # Uncomment this and rebuild artifacts to enable debugging
 set(CMAKE_BUILD_TYPE Debug)
 
-project(cfemodel VERSION 1.0.0 DESCRIPTION "External CFE Model Shared Library")
+project(cfebmi VERSION 1.0.0 DESCRIPTION "OWP CFE BMI Module Shared Library")
+
+# CFE
+set(CFE_LIB_NAME_CMAKE cfebmi)
+set(CFE_LIB_DESC_CMAKE "OWP CFE BMI Module Shared Library")
+
+# Make sure these are compiled with this directive
+add_compile_definitions(BMI_ACTIVE)
 
 if(WIN32)
-    add_library(cfemodel src/bmi_cfe.c src/cfe.c)
+    add_library(cfebmi cfe/src/bmi_cfe.c cfe/src/cfe.c)
 else()
-    add_library(cfemodel SHARED src/bmi_cfe.c src/cfe.c)
+    add_library(cfebmi SHARED cfe/src/bmi_cfe.c cfe/src/cfe.c)
 endif()
 
-target_include_directories(cfemodel PRIVATE include)
+target_include_directories(cfebmi PRIVATE cfe/include)
 
-set_target_properties(cfemodel PROPERTIES VERSION ${PROJECT_VERSION})
+set_target_properties(cfebmi PROPERTIES VERSION ${PROJECT_VERSION})
 
-set_target_properties(cfemodel PROPERTIES PUBLIC_HEADER include/bmi_cfe.h)
+set_target_properties(cfebmi PROPERTIES PUBLIC_HEADER cfe/bmi_cfe.h)
 
 include(GNUInstallDirs)
 
-install(TARGETS cfemodel
+install(TARGETS cfebmi
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-configure_file(cfemodel.pc.in cfemodel.pc @ONLY)
+configure_file(cfebmi.pc.in cfebmi.pc @ONLY)
 
-install(FILES ${CMAKE_BINARY_DIR}/cfemodel.pc DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)
+install(FILES ${CMAKE_BINARY_DIR}/cfebmi.pc DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pkgconfig)

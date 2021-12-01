@@ -4,82 +4,40 @@
 #include <utility>
 
 #include "Routing_Py_Adapter.hpp"
-//#include "boost/algorithm/string.hpp"
 
 using namespace routing_py_adapter;
 
+Routing_Py_Adapter::Routing_Py_Adapter(std::string t_route_config_file_with_path):
+  t_route_config_path(t_route_config_file_with_path){
+  //Import ngen_main.  Will throw error if module isn't available
+  //in the embedded interperters PYTHON_PATH
+  this->t_route_module = utils::ngenPy::InterpreterUtil::getPyModule("ngen_main");
+  }
 
-/**
- * Parameterized constructor Routing_Py_Adapter with the flow_vector
- *
- * @param t_route_connection_path
- * @param input_path
- * @param catchment_subset_ids
- * @param number_of_timesteps
- * @param delta_time
- * @param flow_vector
- */
-Routing_Py_Adapter::Routing_Py_Adapter(std::string t_route_connection_path, std::string input_path,
-                                       const std::vector<std::string> &catchment_subset_ids,
-                                       int number_of_timesteps, int delta_time,
-                                       const std::vector<double> &flow_vector)
-{}
+void Routing_Py_Adapter::route(int number_of_timesteps, int delta_time,
+                          const std::vector<double> &flow_vector){
+  throw "Routing_Py_Adapter::route overload with flow_vector unimplemented.";
+};
 
-/**
- * Parameterized constructor Routing_Py_Adapter without the flow_vector
- *
- * @param t_route_connection_path
- * @param input_path
- * @param catchment_subset_ids
- * @param number_of_timesteps
- * @param delta_time
- */
-Routing_Py_Adapter::Routing_Py_Adapter(std::string t_route_connection_path, std::string input_path,
-                                       const std::vector<std::string> &catchment_subset_ids,
-                                       int number_of_timesteps, int delta_time)
+void Routing_Py_Adapter::route(int number_of_timesteps, int delta_time)
 {
 
-  //Cast vector of catchment_subset_ids to Python list 
-  py::list catchment_subset_ids_list = py::cast(catchment_subset_ids);
+  std::vector<std::string> arg_vector;
 
-  //Bind python sys module
-  py::module_ sys = py::module_::import("sys");
+  arg_vector.push_back("-f");
 
-  //Create object sys_path for the Python system path
-  py::object sys_path = sys.attr("path");
+  arg_vector.push_back(this->t_route_config_path);
 
-  //Create object to append to the sys_path
-  py::object sys_path_append = sys_path.attr("append");
+  //Cast vector of args to Python list 
+  py::list arg_list = py::cast(arg_vector);
 
-  //Append the t_route_connection_path
-  sys_path_append(t_route_connection_path);
+  //Create object for the ngen_main subroutine
+  py::object ngen_main = t_route_module.attr("ngen_main");
 
-  //Append the input_path
-  sys_path_append(input_path);
+  //Call ngen_main subroutine
+  ngen_main(arg_list);
 
-  //Leave this call here for now for calling previous version of module
-  //this->t_route_module = py::module_::import("next_gen_network_module");
-
-  //Import next_gen_route_main
-  this->t_route_module = py::module_::import("next_gen_route_main");
-
-  //Create object for the set_paths subroutine
-  py::object set_paths = t_route_module.attr("set_paths");
-
-  //Call set_paths subroutine
-  set_paths(t_route_connection_path);
-
-  //Create object for ngen_routing subroutine
-  py::object ngen_routing = t_route_module.attr("ngen_routing");
-
-  //Call ngen_routing subroutine
-  ngen_routing(number_of_timesteps, delta_time);
-
-  //Create object for call_read_catchment_lateral_flows subroutine
-  py::object call_read_catchment_lateral_flows = t_route_module.attr("call_read_catchment_lateral_flows");
-
-  //Call call_read_catchment_lateral_flows subroutine
-  call_read_catchment_lateral_flows(input_path);
+  std::cout << "Finished routing" << std::endl;
 
 }
 

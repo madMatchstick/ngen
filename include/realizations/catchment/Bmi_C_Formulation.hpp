@@ -13,13 +13,7 @@ namespace realization {
 
     public:
 
-        Bmi_C_Formulation(std::string id, Forcing forcing, utils::StreamHandler output_stream);
-
-        Bmi_C_Formulation(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream);
-
-        const vector<string> get_bmi_input_variables() override;
-
-        const vector<string> get_bmi_output_variables() override;
+        Bmi_C_Formulation(std::string id, std::unique_ptr<forcing::ForcingProvider> forcing_provider, utils::StreamHandler output_stream);
 
         std::string get_formulation_type() override;
 
@@ -48,7 +42,9 @@ namespace realization {
          * The default delimiter is a comma.
          *
          * Implementations will throw `invalid_argument` exceptions if data for the provided time step parameter is not
-         * accessible.
+         * accessible.  Note that, for this type, only the last processed time step is accessible, because formulations
+         * do not save results from previous time steps.  This also has the consequence of there being no valid set of
+         * arguments before a least one call to @ref get_response has been made.
          *
          * @param timestep The time step for which data is desired.
          * @return A delimited string with all the output variable values for the given time step.
@@ -91,9 +87,9 @@ namespace realization {
          */
         double get_response(time_step_t t_index, time_step_t t_delta) override;
 
-        inline bool is_bmi_input_variable(const std::string &var_name) override;
+        bool is_bmi_input_variable(const std::string &var_name) override;
 
-        inline bool is_bmi_output_variable(const std::string &var_name) override;
+        bool is_bmi_output_variable(const std::string &var_name) override;
 
     protected:
 
@@ -109,7 +105,9 @@ namespace realization {
          */
         std::shared_ptr<models::bmi::Bmi_C_Adapter> construct_model(const geojson::PropertyMap& properties) override;
 
-        time_t convert_model_time(const double &model_time) override;
+        time_t convert_model_time(const double &model_time) override {
+            return (time_t) (get_bmi_model()->convert_model_time_to_seconds(model_time));
+        }
 
         /**
          * Get a value, converted to specified type, for an output variable at a time step.
@@ -183,6 +181,8 @@ namespace realization {
          */
         bool is_model_initialized() override;
 
+        friend class Bmi_Multi_Formulation;
+
         // Unit test access
         friend class ::Bmi_Formulation_Test;
         friend class ::Bmi_C_Formulation_Test;
@@ -190,7 +190,25 @@ namespace realization {
 
     private:
 
-        /** Index value (0-based) of the time step that will be processed by the next update of the model. */
+        /**
+         * Index value (0-based) of the time step that will be processed by the next update of the model.
+         *
+         * A formulation time step for BMI types can be thought of as the execution of a call to any of the functions of
+         * the underlying BMI model that advance the model (either `update` or `update_until`). This member stores the
+         * ordinal index of the next time step to be executed.  Except in the initial formulation state, this will be
+         * one greater than the index of the last executed time step.
+         *
+         * E.g., on initialization, before any calls to @ref get_response, this value will be ``0``.  After a call to
+         * @ref get_response (assuming ``0`` as the passed ``t_index`` argument), time step ``0`` will be processed, and
+         * this member would be incremented by 1, thus making it ``1``.
+         *
+         * The member serves as an implicit marker of how many time steps have been processed so far.  Knowing this is
+         * required to maintain valid behavior in certain things, such as @ref get_response (we may want to process
+         * multiple time steps forward to a particular index other than the next, but it would not be valid to receive
+         * a ``t_index`` earlier than the last processed time step) and @ref get_output_line_for_timestep (because
+         * formulations do not save results from previous time steps, only the results from the last processed time step
+         * can be used to generate output).
+         */
         int next_time_step_index = 0;
 
     };

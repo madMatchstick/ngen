@@ -14,6 +14,10 @@
 #include "StreamHandler.hpp"
 #include "boost/algorithm/string.hpp"
 #include "Bmi_Adapter.hpp"
+#include "python/InterpreterUtil.hpp"
+
+// Forward declaration to provide access to protected items in testing
+class Bmi_Py_Adapter_Test;
 
 namespace py = pybind11;
 
@@ -31,13 +35,49 @@ namespace models {
 
         public:
 
-            Bmi_Py_Adapter(const string &type_name, std::string bmi_init_config, bool allow_exceed_end,
-                           bool has_fixed_time_step, const geojson::JSONProperty& other_input_vars,
+            Bmi_Py_Adapter(const string &type_name, std::string bmi_init_config, const string &bmi_python_type,
+                           bool allow_exceed_end, bool has_fixed_time_step, utils::StreamHandler output);
+
+            Bmi_Py_Adapter(const string &type_name, std::string bmi_init_config, const string &bmi_python_type,
+                           std::string forcing_file_path, bool allow_exceed_end, bool has_fixed_time_step,
                            utils::StreamHandler output);
 
-            Bmi_Py_Adapter(const string &type_name, std::string  bmi_init_config, std::string forcing_file_path,
-                           bool allow_exceed_end, bool has_fixed_time_step,
-                           const geojson::JSONProperty& other_input_vars, utils::StreamHandler output);
+            /**
+             * Copy the given BMI variable's values from the backing numpy array to a C++ array.
+             *
+             * @tparam T The appropriate C++ type for the values.
+             * @param name The name of the BMI variable in question.
+             * @param dest A pointer to an already-allocated array in which to copy the values of the desired BMI
+             *             variable, which is assume to be of the necessary size.
+             */
+            template <typename T>
+            void copy_to_array(const string& name, T *dest)
+            {
+                py::array_t<T> backing_array = bmi_model->attr("get_value_ptr")(name);
+                auto uncheck_proxy = backing_array.template unchecked<1>();
+                for (ssize_t i = 0; i < backing_array.size(); ++i) {
+                    dest[i] = uncheck_proxy(i);
+                }
+            }
+
+            /**
+             * Copy the given BMI variable's values from the backing numpy array to a C++ vector.
+             *
+             * @tparam T The appropriate C++ type for the values.
+             * @param name The name of the BMI variable in question.
+             * @return A vector containing the values of the desired BMI variable.
+             */
+            template <typename T>
+            std::vector<T> copy_to_vector(const string& name)
+            {
+                py::array_t<T> backing_array = bmi_model->attr("get_value_ptr")(name);
+                std::vector<T> dest(backing_array.size());
+                auto uncheck_proxy = backing_array.template unchecked<1>();
+                for (ssize_t i = 0; i < backing_array.size(); ++i) {
+                    dest[i] = uncheck_proxy(i);
+                }
+                return dest;
+            }
 
             void Finalize() override {
                 bmi_model->attr("finalize")();
@@ -168,6 +208,133 @@ namespace models {
 
             void *GetValuePtr(std::string name) override;
 
+            /**
+             * Get the name string for the C++ type analogous to the described type in the Python backing model.
+             *
+             * Note that the size of an individual item is also required, as this can vary in certain situations in
+             * Python.
+             *
+             * @param py_type_name The string name of the analog type in Python.
+             * @param item_size The particular size in bytes for items of the involved analogous types.
+             * @return The name string for the C++ type analogous to the described type in the Python backing model.
+             */
+            const std::string get_analogous_cxx_type(const std::string &py_type_name, const size_t item_size) override {
+                /*
+                 * Note that an implementation using a "switch" statement would be problematic.  It could be done by
+                 * rewriting to separate the integer and non-integer type, then having cases based on size.  However,
+                 * this might cause trouble on certain systems, since (depending on the particular sizes of types) that
+                 * could produce duplicate "case" values.
+                 */
+                if (py_type_name == "int" && item_size == sizeof(short)) {
+                    return "short";
+                } else if (py_type_name == "int" && item_size == sizeof(int)) {
+                    return "int";
+                } else if (py_type_name == "int" && item_size == sizeof(long)) {
+                    return "long";
+                } else if (py_type_name == "int" && item_size == sizeof(long long)) {
+                    return "long long";
+                } else if (py_type_name == "float" && item_size == sizeof(float)) {
+                    return "float";
+                } else if ((py_type_name == "float" || py_type_name == "float64" || py_type_name == "np.float64" ||
+                            py_type_name == "numpy.float64") && item_size == sizeof(double)) {
+                    return "double";
+                } else if (py_type_name == "float" && item_size == sizeof(long double)) {
+                    return "long double";
+                } else {
+                    throw runtime_error(
+                            "(Bmi_Py_Adapter) Failed determining analogous C++ type for Python model '" + py_type_name +
+                            "' type with size " + std::to_string(item_size) + " bytes.");
+                }
+            }
+
+
+            /**
+             * Get the analogous built-in Python type for the C++ type with the provided name.
+             *
+             * @param cxx_type_name The string name of the analog type in C++.
+             * @return The name of the appropriate built-in Python type.
+             */
+            inline std::string get_analog_python_builtin(const std::string &cxx_type_name) {
+                if (cxx_type_name == "short" || cxx_type_name == "int" || cxx_type_name == "long" ||
+                    cxx_type_name == "long long") {
+                    return "int";
+                } else if (cxx_type_name == "float" || cxx_type_name == "double" || cxx_type_name == "long double") {
+                    return "double";
+                } else {
+                    throw runtime_error("(Bmi_Py_Adapter) Failed determining analogous built-in Python type for C++ '" +
+                                        cxx_type_name + "' type");
+                }
+            }
+
+            /**
+             * Get the analogous Python type appropriate for use in numpy arrays for the described  C++ type.
+             *
+             * @param cxx_type_name The string name of the analog type in C++.
+             * @param item_size The particular size in bytes for items of the involved analogous types.
+             * @return The name of the appropriate Python type.
+             */
+            inline std::string get_analog_python_dtype(const std::string &cxx_type_name, const size_t item_size) {
+                // TODO: figure out how to correctly get this
+                std::string numpy_module_name = "numpy";
+
+                if (cxx_type_name == "short" || cxx_type_name == "int" || cxx_type_name == "long" ||
+                    cxx_type_name == "long long")
+                {
+                    switch (item_size) {
+                        case 1: return numpy_module_name + ".int8";
+                        case 2: return numpy_module_name + ".int16";
+                        case 4: return numpy_module_name + ".int32";
+                        case 8: return numpy_module_name + ".int64";
+                        default: break;
+                    }
+                }
+
+                if (cxx_type_name == "float" || cxx_type_name == "double" || cxx_type_name == "long double") {
+                    switch (item_size) {
+                        case 2: return numpy_module_name + ".float16";
+                        case 4: return numpy_module_name + ".float32";
+                        case 8: return numpy_module_name + ".float64";
+                        default: break;
+                    }
+                }
+
+                throw runtime_error("(Bmi_Py_Adapter) Failed determining analogous Python dtype for C++ '" +
+                                    cxx_type_name + "' type with size " + std::to_string(item_size) + " bytes.");
+            }
+
+            /**
+             * Get the analogous Python type (or ``dtype``) for the described C++ type.
+             *
+             * Get the appropriate name of the analogous Python type for the described C++ type.  If set to do so, use
+             * numpy-specific types appropriate for an array ``dtype`` over standard, built-in Python types.
+             *
+             * @param cxx_type_name The string name of the analog type in C++.
+             * @param item_size The particular size in bytes for items of the involved analogous types.
+             * @param is_dtype Whether to prioritize numpy-specific types
+             * @return The name of the appropriate Python type.
+             */
+            inline std::string get_analog_python_type(const std::string &cxx_type_name, const size_t item_size,
+                                                      const bool is_dtype)
+            {
+                return is_dtype ? get_analog_python_dtype(cxx_type_name, item_size) : get_analog_python_builtin(
+                        cxx_type_name);
+            }
+
+            /**
+             * Get the analogous Python type for the described C++ type.
+             *
+             * Get the appropriate name of the analogous Python type for the described C++ type.  This variant assumes
+             * that a standard built-in type is sufficient, and numpy-specific types are not needed (as they might be
+             * for certain situations, like when dealing with BMI variable numpy array type).
+             *
+             * @param cxx_type_name The string name of the analog type in C++.
+             * @param item_size The particular size in bytes for items of the involved analogous types.
+             * @return The name of the appropriate Python type.
+             */
+            inline std::string get_analog_python_type(const std::string &cxx_type_name, const size_t item_size) {
+                return get_analog_python_type(cxx_type_name, item_size, false);
+            }
+
             template <typename T>
             void get_and_copy_grid_array(const char* grid_func_name, const int grid, T* dest, int dest_length,
                                          const char* np_dtype)
@@ -247,12 +414,14 @@ namespace models {
                     get_via_numpy_array<long>(name, dest, inds, count, val_item_size, is_all_indices);
                 else if (val_type == "int" && val_item_size == sizeof(long long))
                     get_via_numpy_array<long long>(name, dest, inds, count, val_item_size, is_all_indices);
-                else if (val_type == "float" && val_item_size == sizeof(float))
-                    get_via_numpy_array<float>(name, dest, inds, count, val_item_size, is_all_indices);
-                else if (val_type == "float" && val_item_size == sizeof(double))
-                    get_via_numpy_array<double>(name, dest, inds, count, val_item_size, is_all_indices);
-                else if (val_type == "float" && val_item_size == sizeof(long double))
-                    get_via_numpy_array<long double>(name, dest, inds, count, val_item_size, is_all_indices);
+                else if (val_type == "float" || val_type == "float16" || val_type == "float32" || val_type == "float64") {
+                    if (val_item_size == sizeof(float))
+                        get_via_numpy_array<float>(name, dest, inds, count, val_item_size, is_all_indices);
+                    else if (val_item_size == sizeof(double))
+                        get_via_numpy_array<double>(name, dest, inds, count, val_item_size, is_all_indices);
+                    else if (val_item_size == sizeof(long double))
+                        get_via_numpy_array<long double>(name, dest, inds, count, val_item_size, is_all_indices);
+                }
                 else
                     throw runtime_error(
                             "(Bmi_Py_Adapter) Failed attempt to GET values of BMI variable '" + name + "' from '" +
@@ -293,7 +462,7 @@ namespace models {
                 }
                 else {
                     py::array_t<int, py::array::c_style> indices_np_array
-                            = np.attr("zeros")(item_count, "dtype"_a = "int", "order"_a = "C");
+                            = np.attr("zeros")(item_count, "dtype"_a = "int32", "order"_a = "C");
                     auto indices_mut_direct = indices_np_array.mutable_unchecked<1>();
                     for (py::size_t i = 0; i < (py::size_t) item_count; ++i)
                         indices_mut_direct(i) = indices[i];
@@ -314,22 +483,68 @@ namespace models {
             }
 
             /**
-             * Parse variable value(s) from within "other_vars" property of formulation config, to a numpy array suitable for
-             * passing to the BMI model via the ``set_value`` function.
+             * Whether the backing model has been initialized yet.
              *
-             * @param other_value_json JSON node containing variable/parameter value(s) needing to be passed to a BMI model.
-             * @return A bound Python numpy array to containing values to pass to a BMI model object via ``set_value``.
+             * @return Whether the backing model has been initialized yet.
              */
-            static py::array parse_other_var_val_for_setter(const geojson::JSONProperty& other_value_json);
+            inline bool is_model_initialized() {
+                return model_initialized;
+            }
 
             void Update() override;
 
             void UpdateUntil(double time) override;
 
             void SetValue(std::string name, void *src) override {
-                void* dest = GetValuePtr(name);
-                vector<string> in_v = GetInputVarNames();
-                memcpy(dest, src, GetVarNbytes(name));
+                int itemSize = GetVarItemsize(name);
+                std::string py_type = GetVarType(name);
+                std::string cxx_type = get_analogous_cxx_type(py_type, (size_t) itemSize);
+
+                if (cxx_type == "short") {
+                    set_value<short>(name, (short *) src);
+                } else if (cxx_type == "int") {
+                    set_value<int>(name, (int *) src);
+                } else if (cxx_type == "long") {
+                    set_value<long>(name, (long *) src);
+                } else if (cxx_type == "long long") {
+                    set_value<long long>(name, (long long *) src);
+                } else if (cxx_type == "float") {
+                    set_value<float>(name, (float *) src);
+                } else if (cxx_type == "double") {
+                    set_value<double>(name, (double *) src);
+                } else if (cxx_type == "long double") {
+                    set_value<long double>(name, (long double *) src);
+                } else {
+                    throw std::runtime_error("Bmi_Py_Adapter cannot set values for variable '" + name +
+                                             "' that has unrecognized C++ type '" + cxx_type + "'");
+                }
+            }
+
+            /**
+             * Set the values of the given BMI variable for the model, sourcing new data from the provided vector.
+             *
+             * @tparam T The type of the variable source values.
+             * @param name The name of the involved BMI model variable.
+             * @param src The source vector of new values to use to set the values in the backing BMI model, which must
+             *            be of the same length as the model's variable array.
+             */
+            template <typename T>
+            void set_value(const std::string &name, std::vector<T> src) {
+                int nbytes = GetVarNbytes(name);
+                int itemSize = GetVarItemsize(name);
+                int length = nbytes / itemSize;
+
+                if (length != src.size()) {
+                    throw std::runtime_error(
+                            "Bmi_Py_Adapter mismatch of lengths setting variable array (" + std::to_string(length) +
+                            " expected but " + std::to_string(src.size()) + " received)");
+                }
+
+                py::array_t<T> model_var_array = bmi_model->attr("get_value_ptr")(name);
+                auto mutable_unchecked_proxy = model_var_array.template mutable_unchecked<1>();
+                for (size_t i = 0; i < length; ++i) {
+                    mutable_unchecked_proxy(i) = src[i];
+                }
             }
 
             /**
@@ -372,29 +587,11 @@ namespace models {
              */
             template <typename T>
             void set_value_at_indices(const string &name, const int *inds, int count, void* cxx_array,
-                                      const char* np_type)
+                                      const string &np_type)
             {
-                py::array_t<int> index_np_array = np.attr("zeros")(count, "dtype"_a = "int");
-                py::array_t<T> src_np_array = np.attr("zeros")(count, "dtype"_a = np_type);
-                // These get direct access (mutable) to the arrays, since we don't need to worry about dimension checks
-                // as we just created the arrays
-                auto index_mut_direct = index_np_array.mutable_unchecked<1>();
-                auto src_mut_direct = index_np_array.mutable_unchecked<1>();
-                for (py::size_t i = 0; i < (py::size_t) count; ++i) {
-                    index_mut_direct(i) = inds[i];
-                    src_mut_direct(i) = ((T *)cxx_array)[i];
-                }
-
-                /* The other method should work better, but leaving this for now in case.
-                py::buffer_info indx_buffer_info = index_np_array.request();
-                py::buffer_info src_buffer_info = src_np_array.request();
-                for (int i = 0; i < count; ++i) {
-                    ((int *) indx_buffer_info.ptr)[i] = inds[i];
-                    ((T *) src_buffer_info.ptr)[i] = ((T *) cxx_array)[i];
-                }
-                */
-
-                bmi_model->attr("set_value_at_indices")(name, index_np_array, src_np_array);
+                py::array_t<int> index_array(py::buffer_info(inds, count));
+                py::array_t<T> src_array(py::buffer_info((T*)cxx_array, count));
+                bmi_model->attr("set_value_at_indices")(name, index_array, src_array);
             }
 
         protected:
@@ -403,24 +600,50 @@ namespace models {
             /**
              * Construct the backing BMI model object, then call its BMI-native ``Initialize()`` function.
              *
-             * Implementations should return immediately without taking any further action if ``model_initialized`` is
-             * already ``true``.
+             * Returns immediately without taking any further action if ``model_initialized`` is already ``true``.
              *
-             * The call to the BMI native ``Initialize(string)`` should pass the value stored in ``bmi_init_config``.
+             * Performs a call to the BMI native ``Initialize(string)`` and passes the value stored in
+             * ``bmi_init_config``.
              */
             void construct_and_init_backing_model() override {
+                construct_and_init_backing_model_for_py_adapter();
+            }
+
+        private:
+
+            /** Fully qualified Python type name for backing module. */
+            string bmi_type_py_full_name;
+            /** A binding to the Python numpy package/module. */
+            py::module_ np;
+            /** A pointer to a string with the parent package name of the Python type referenced by ``py_bmi_type_ref``. */
+            shared_ptr<string> bmi_type_py_module_name;
+            /** A pointer to a string with the simple name of the Python type referenced by ``py_bmi_type_ref``. */
+            shared_ptr<string> bmi_type_py_class_name;
+
+            /**
+             * Construct the backing BMI model object, then call its BMI-native ``Initialize()`` function.
+             *
+             * Private wrapper function, to allow use from constructors.
+             *
+             * Returns immediately without taking any further action if ``model_initialized`` is already ``true``.
+             *
+             * Performs a call to the BMI native ``Initialize(string)`` and passes the value stored in
+             * ``bmi_init_config``.
+             */
+            inline void construct_and_init_backing_model_for_py_adapter() {
                 if (model_initialized)
                     return;
                 try {
                     separate_package_and_simple_name();
+                    vector<string> moduleComponents = {*bmi_type_py_module_name, *bmi_type_py_class_name};
                     // This is a class object for the BMI module Python class
-                    py::object bmi_py_class = py::module_::import(py_bmi_type_package_name->c_str()).attr(
-                            py_bmi_type_simple_name->c_str());
+                    py::module_ bmi_py_class = utils::ngenPy::InterpreterUtil::getPyModule(moduleComponents);
                     // This is the actual backing model object
                     bmi_model = make_shared<py::object>(bmi_py_class());
-                    bmi_model->attr("Initialize")(bmi_init_config);
+                    bmi_model->attr("initialize")(bmi_init_config);
                 }
-                    // Record the exception message before re-throwing to handle subsequent function calls properly
+                // Record the exception message before re-throwing to handle subsequent function calls properly
+                // TODO: handle exceptions in better detail, without losing type information
                 catch (exception& e) {
                     init_exception_msg = string(e.what());
                     // Make sure this is non-empty to be consistent with the above logic
@@ -431,36 +654,62 @@ namespace models {
                 }
             }
 
-
-        private:
-
-            /** Fully qualified Python type name for backing module. */
-            string bmi_py_type_name;
-            /** A binding to the Python numpy package/module. */
-            py::module_ np;
-            /** A pointer to a string with the parent package name of the Python type referenced by ``py_bmi_type_ref``. */
-            shared_ptr<string> py_bmi_type_package_name;
-            /** A pointer to a string with the simple name of the Python type referenced by ``py_bmi_type_ref``. */
-            shared_ptr<string> py_bmi_type_simple_name;
-
+            /**
+             * Parse the full name of the BMI model type to its module/package name and (simple) class name.
+             *
+             * Parse the full name into separate components, expecting ``.`` as the delimiter.  Expect the last
+             * substring to be the class name.  Rejoin the earlier substrings to construct the module or package name.
+             *
+             * @throw std::runtime_error Thrown if initial type name not in the format ``<module_name>.<class_name>``.
+             */
             inline void separate_package_and_simple_name() {
                 if (!model_initialized) {
                     vector<string> split_name;
                     string delimiter = ".";
+                    string name_string = bmi_type_py_full_name;
 
                     size_t pos = 0;
                     string token;
-                    while ((pos = bmi_py_type_name.find(delimiter)) != string::npos) {
-                        token = bmi_py_type_name.substr(0, pos);
+                    while ((pos = name_string.find(delimiter)) != string::npos) {
+                        token = name_string.substr(0, pos);
                         split_name.emplace_back(token);
-                        bmi_py_type_name.erase(0, pos + delimiter.length());
+                        name_string.erase(0, pos + delimiter.length());
                     }
-
-                    py_bmi_type_simple_name = make_shared<string>(split_name.back());
-                    split_name.pop_back();
-                    py_bmi_type_package_name = make_shared<string>(boost::algorithm::join(split_name, delimiter));
+                    if (split_name.empty()) {
+                        throw std::runtime_error("Cannot interpret BMI Python model type '" + bmi_type_py_full_name
+                                                 + "'; expected format is <python_module>.<python_class>");
+                    }
+                    // What's left should be the class name
+                    bmi_type_py_class_name = make_shared<string>(name_string);
+                    //split_name.pop_back();
+                    // And then the split name should contain the module
+                    // TODO: going to need to look at this again in the future; right now, assuming the format
+                    //  <python_module>.<python_class> works fine as long as a model class is always in a top-level
+                    //  module, but the current logic is going to interpret any complex parent module name as a single
+                    //  top-level namespace package; e.g., ngen.namespacepackage.model works if ngen.namespacepackage is
+                    //  a namespace package, but there would be problems with something like ngenpkg.innermodule1.model.
+                    bmi_type_py_module_name = make_shared<string>(boost::algorithm::join(split_name, delimiter));
                 }
             }
+
+            /**
+             * Set the values of the given BMI variable based on a provided C++ array of values.
+             *
+             * @tparam T The type of source values, assumed to be appropriate for the involved variable.
+             * @param name The name of the involved BMI model variable.
+             * @param src An array of source values to apply to the BMI variable, assumed to be of the same size as the
+             *            BMI model's current array for the involved variable.
+             */
+            template <typename T>
+            void set_value(const std::string &name, T *src) {
+                // Because all BMI arrays are flattened, we can just use the size/length in the buffer info
+                int length = GetVarNbytes(name) / GetVarItemsize(name);
+                py::array_t<T> src_array(py::buffer_info(src, length));
+                bmi_model->attr("set_value")(name, src_array);
+            }
+
+            // For unit testing
+            friend class ::Bmi_Py_Adapter_Test;
         };
 
     }

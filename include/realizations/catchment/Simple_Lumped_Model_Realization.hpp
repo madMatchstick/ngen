@@ -5,7 +5,8 @@
 #include "reservoir/Reservoir.hpp"
 #include "hymod/include/Hymod.h"
 #include <unordered_map>
-
+#include <ForcingProvider.hpp>
+#include <Forcing.h>
 
 class Simple_Lumped_Model_Realization
         : public realization::Catchment_Formulation {
@@ -31,7 +32,10 @@ class Simple_Lumped_Model_Realization
             time_step_t t
         );
 
-        Simple_Lumped_Model_Realization(std::string id, forcing_params forcing_config, utils::StreamHandler output_stream) : Catchment_Formulation(id, forcing_config, output_stream) {};
+        Simple_Lumped_Model_Realization(std::string id, unique_ptr<forcing::ForcingProvider> forcing_provider, utils::StreamHandler output_stream) : Catchment_Formulation(id, std::move(forcing_provider), output_stream) {
+            // We now only use the ForcingProvider interface on Forcing objects, so this is not needed (and explodes).
+            //_link_legacy_forcing();
+        };
 
         Simple_Lumped_Model_Realization(std::string id) : Catchment_Formulation(id){};
 
@@ -88,14 +92,14 @@ class Simple_Lumped_Model_Realization
 
         double calc_et() override;
 
-        virtual void create_formulation(boost::property_tree::ptree &config, geojson::PropertyMap *global = nullptr);
-        virtual void create_formulation(geojson::PropertyMap properties);
+        void create_formulation(boost::property_tree::ptree &config, geojson::PropertyMap *global = nullptr) override;
+        void create_formulation(geojson::PropertyMap properties) override;
 
-        virtual std::string get_formulation_type() {
+        std::string get_formulation_type() override {
             return "simple_lumped";
         }
 
-        void add_time(time_t t, double n);
+        void add_time(time_t t, double n) override;
 
     protected:
         std::vector<std::string> REQUIRED_PARAMETERS = {
@@ -113,7 +117,7 @@ class Simple_Lumped_Model_Realization
             "t"
         };
 
-        virtual const std::vector<std::string>& get_required_parameters() {
+        const std::vector<std::string>& get_required_parameters() override {
             return REQUIRED_PARAMETERS;
         }
 

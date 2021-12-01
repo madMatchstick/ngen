@@ -2,6 +2,7 @@
 #define NGEN_FORCINGPROVIDER_HPP
 
 #include <map>
+#include <vector>
 
 namespace forcing {
 
@@ -21,6 +22,8 @@ namespace forcing {
          */
 
     public:
+
+        virtual ~ForcingProvider() = default;
 
         virtual const std::vector<std::string> &get_available_forcing_outputs() = 0;
 

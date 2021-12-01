@@ -9,19 +9,33 @@ using namespace models::bmi;
 using namespace std;
 using namespace pybind11::literals; // to bring in the `_a` literal for pybind11 keyword args functionality
 
-Bmi_Py_Adapter::Bmi_Py_Adapter(const string &type_name, string bmi_init_config, bool allow_exceed_end,
-                               bool has_fixed_time_step, const geojson::JSONProperty& other_input_vars,
-                               utils::StreamHandler output)
-    : Bmi_Py_Adapter(type_name, move(bmi_init_config), "", allow_exceed_end, has_fixed_time_step, other_input_vars,
-                     move(output)) {}
+Bmi_Py_Adapter::Bmi_Py_Adapter(const string &type_name, string bmi_init_config, const string &bmi_python_type,
+                               bool allow_exceed_end, bool has_fixed_time_step, utils::StreamHandler output)
+        : Bmi_Py_Adapter(type_name, move(bmi_init_config), bmi_python_type, "", allow_exceed_end, has_fixed_time_step,
+                         move(output)) {}
 
-Bmi_Py_Adapter::Bmi_Py_Adapter(const string &type_name, string bmi_init_config, string forcing_file_path,
-                               bool allow_exceed_end, bool has_fixed_time_step,
-                               const geojson::JSONProperty& other_input_vars, utils::StreamHandler output)
-                               : Bmi_Adapter<py::object>(type_name +" (BMI Py)", move(bmi_init_config),
-                                                         move(forcing_file_path), allow_exceed_end, has_fixed_time_step,
-                                                         other_input_vars, output),
-                                 np(py::module_::import("numpy")) /* like 'import numpy as np' */ { }
+Bmi_Py_Adapter::Bmi_Py_Adapter(const string &type_name, string bmi_init_config, const string &bmi_python_type,
+                               string forcing_file_path, bool allow_exceed_end, bool has_fixed_time_step,
+                               utils::StreamHandler output)
+        : Bmi_Adapter<py::object>(type_name + " (BMI Py)", move(bmi_init_config),
+                                  move(forcing_file_path), allow_exceed_end, has_fixed_time_step,
+                                  output),
+          bmi_type_py_full_name(bmi_python_type),
+          np(utils::ngenPy::InterpreterUtil::getPyModule("numpy")) /* like 'import numpy as np' */
+{
+    try {
+        construct_and_init_backing_model_for_py_adapter();
+        // Make sure this is set to 'true' after this function call finishes
+        model_initialized = true;
+        acquire_time_conversion_factor(bmi_model_time_convert_factor);
+    }
+        // Record the exception message before re-throwing to handle subsequent function calls properly
+    catch (exception &e) {
+        // Make sure this is set to 'true' after this function call finishes
+        model_initialized = true;
+        throw e;
+    }
+}
 
 string Bmi_Py_Adapter::GetComponentName() {
     return py::str(bmi_model->attr("get_component_name")());
@@ -81,9 +95,34 @@ double Bmi_Py_Adapter::GetTimeStep() {
 }
 
 void Bmi_Py_Adapter::GetValue(string name, void *dest) {
-    int num_items = GetVarNbytes(name) / GetVarItemsize(name);
-    int indices[num_items];
-    get_value_at_indices(name, dest, indices, num_items, true);
+    string cxx_type;
+    try {
+        cxx_type = get_analogous_cxx_type(GetVarType(name), GetVarItemsize(name));
+    }
+    catch (runtime_error &e) {
+        string msg = "Encountered error getting C++ type during call to GetValue: \n";
+        msg += e.what();
+        throw runtime_error(msg);
+    }
+
+    if (cxx_type == "short") {
+        copy_to_array<short>(name, (short *) dest);
+    } else if (cxx_type == "int") {
+        copy_to_array<int>(name, (int *) dest);
+    } else if (cxx_type == "long") {
+        copy_to_array<long>(name, (long *) dest);
+    } else if (cxx_type == "long long") {
+        copy_to_array<long long>(name, (long long *) dest);
+    } else if (cxx_type == "float") {
+        copy_to_array<float>(name, (float *) dest);
+    } else if (cxx_type == "double") {
+        copy_to_array<double>(name, (double *) dest);
+    } else if (cxx_type == "long double") {
+        copy_to_array<long double>(name, (long double *) dest);
+    } else {
+        throw runtime_error("Bmi_Py_Adapter can't get value of unsupported type: " + cxx_type);
+    }
+
 }
 
 void Bmi_Py_Adapter::GetValueAtIndices(std::string name, void *dest, int *inds, int count) {
@@ -103,7 +142,7 @@ int Bmi_Py_Adapter::GetVarGrid(std::string name) {
 }
 
 int Bmi_Py_Adapter::GetVarItemsize(std::string name) {
-    return py::int_(bmi_model->attr("get_var_grid")(name));
+    return py::int_(bmi_model->attr("get_var_itemsize")(name));
 }
 
 string Bmi_Py_Adapter::GetVarLocation(std::string name) {
@@ -123,11 +162,11 @@ string Bmi_Py_Adapter::GetVarUnits(std::string name) {
 }
 
 std::string Bmi_Py_Adapter::get_bmi_type_package() const {
-    return py_bmi_type_package_name == nullptr ? "" : *py_bmi_type_package_name;
+    return bmi_type_py_module_name == nullptr ? "" : *bmi_type_py_module_name;
 }
 
 std::string Bmi_Py_Adapter::get_bmi_type_simple_name() const {
-    return py_bmi_type_simple_name == nullptr ? "" : *py_bmi_type_simple_name;
+    return bmi_type_py_class_name == nullptr ? "" : *bmi_type_py_class_name;
 }
 
 /**
@@ -153,19 +192,21 @@ void Bmi_Py_Adapter::SetValueAtIndices(std::string name, int *inds, int count, v
 
     // The available types and how they are handled here should match what is in get_value_at_indices
     if (val_type == "int" && val_item_size == sizeof(short)) {
-        set_value_at_indices<short>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<short>(name, inds, count, src, val_type);
     } else if (val_type == "int" && val_item_size == sizeof(int)) {
-        set_value_at_indices<int>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<int>(name, inds, count, src, val_type);
     } else if (val_type == "int" && val_item_size == sizeof(long)) {
-        set_value_at_indices<long>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<long>(name, inds, count, src, val_type);
     } else if (val_type == "int" && val_item_size == sizeof(long long)) {
-        set_value_at_indices<long long>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<long long>(name, inds, count, src, val_type);
     } else if (val_type == "float" && val_item_size == sizeof(float)) {
-        set_value_at_indices<float>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<float>(name, inds, count, src, val_type);
     } else if (val_type == "float" && val_item_size == sizeof(double)) {
-        set_value_at_indices<double>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<double>(name, inds, count, src, val_type);
+    } else if (val_type == "float64" && val_item_size == sizeof(double)) {
+        set_value_at_indices<double>(name, inds, count, src, val_type);
     } else if (val_type == "float" && val_item_size == sizeof(long double)) {
-        set_value_at_indices<long double>(name, inds, count, src, val_type.c_str());
+        set_value_at_indices<long double>(name, inds, count, src, val_type);
     } else {
         throw runtime_error(
                 "(Bmi_Py_Adapter) Failed attempt to SET values of BMI variable '" + name + "' from '" +
@@ -180,33 +221,6 @@ void Bmi_Py_Adapter::Update() {
 
 void Bmi_Py_Adapter::UpdateUntil(double time) {
     bmi_model->attr("update_until")(time);
-}
-
-/**
- * Parse variable value(s) from within "other_vars" property of formulation config, to a numpy array suitable for
- * passing to the BMI model via the ``set_value`` function.
- *
- * @param other_value_json JSON node containing variable/parameter value(s) needing to be passed to a BMI model.
- * @return A bound Python numpy array to containing values to pass to a BMI model object via ``set_value``.
- */
-// TODO: unit test
-py::array Bmi_Py_Adapter::parse_other_var_val_for_setter(const geojson::JSONProperty& other_value_json) {
-
-    if (other_value_json.get_type() == geojson::PropertyType::Boolean) {
-        return pybind11::array(py::dtype::of<bool>(), {1, 1}, {other_value_json.as_boolean()});
-    }
-    else if (other_value_json.get_type() == geojson::PropertyType::Natural) {
-        return pybind11::array(py::dtype::of<long>(), {1, 1}, {other_value_json.as_natural_number()});
-    }
-    else if (other_value_json.get_type() == geojson::PropertyType::Real) {
-        return pybind11::array(py::dtype::of<double>(), {1, 1}, {other_value_json.as_real_number()});
-    }
-        // TODO: think about handling list explicitly, and handling object type; for now, document restrictions
-        //else if (other_value_json.get_type() == geojson::PropertyType::String) {
-    else {
-        //return pybind11::array(py::dtype::of<string>(), {1, 1}, {other_value_json.as_string()});
-        int a = 1;
-    }
 }
 
 #endif //ACTIVATE_PYTHON
