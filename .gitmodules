@@ -25,4 +25,7 @@
 	path = extern/UDUNITS-2
 	url = https://github.com/Unidata/UDUNITS-2.git
 	ignore = dirty
-
+[submodule "extern/evapotranspiration/evapotranspiration"]
+	path = extern/evapotranspiration/evapotranspiration
+	url = git@github.com:SnowHydrology/evapotranspiration.git
+	branch = bmi-update
