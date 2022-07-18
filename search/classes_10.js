@@ -1,11 +1,13 @@
 var searchData=
 [
-  ['tshirt_5fc_5frealization_0',['Tshirt_C_Realization',['../classrealization_1_1_tshirt___c___realization.html',1,'realization']]],
-  ['tshirt_5fc_5fresult_5ffluxes_1',['tshirt_c_result_fluxes',['../structtshirt__c__result__fluxes.html',1,'']]],
-  ['tshirt_5ffluxes_2',['tshirt_fluxes',['../structtshirt_1_1tshirt__fluxes.html',1,'tshirt']]],
-  ['tshirt_5fmodel_3',['tshirt_model',['../classtshirt_1_1tshirt__model.html',1,'tshirt']]],
-  ['tshirt_5fparams_4',['tshirt_params',['../structtshirt_1_1tshirt__params.html',1,'tshirt']]],
-  ['tshirt_5frealization_5',['Tshirt_Realization',['../classrealization_1_1_tshirt___realization.html',1,'realization']]],
-  ['tshirt_5fstate_6',['tshirt_state',['../structtshirt_1_1tshirt__state.html',1,'tshirt']]],
-  ['tshirtmodeltest_7',['TshirtModelTest',['../class_tshirt_model_test.html',1,'']]]
+  ['request_5ffrom_5fempty_5fnexus_0',['request_from_empty_nexus',['../structrequest__from__empty__nexus.html',1,'']]],
+  ['reservoir_1',['Reservoir',['../class_reservoir_1_1_explicit___time_1_1_reservoir.html',1,'Reservoir::Explicit_Time::Reservoir'],['../class_reservoir_1_1_implicit___time_1_1_reservoir.html',1,'Reservoir::Implicit_Time::Reservoir']]],
+  ['reservoir_5fexponential_5foutlet_2',['Reservoir_Exponential_Outlet',['../class_reservoir_1_1_explicit___time_1_1_reservoir___exponential___outlet.html',1,'Reservoir::Explicit_Time::Reservoir_Exponential_Outlet'],['../class_reservoir_1_1_implicit___time_1_1_reservoir___exponential___outlet.html',1,'Reservoir::Implicit_Time::Reservoir_Exponential_Outlet']]],
+  ['reservoir_5flinear_5foutlet_3',['Reservoir_Linear_Outlet',['../class_reservoir_1_1_explicit___time_1_1_reservoir___linear___outlet.html',1,'Reservoir::Explicit_Time::Reservoir_Linear_Outlet'],['../class_reservoir_1_1_implicit___time_1_1_reservoir___linear___outlet.html',1,'Reservoir::Implicit_Time::Reservoir_Linear_Outlet']]],
+  ['reservoir_5foutlet_4',['Reservoir_Outlet',['../class_reservoir_1_1_explicit___time_1_1_reservoir___outlet.html',1,'Reservoir::Explicit_Time::Reservoir_Outlet'],['../class_reservoir_1_1_implicit___time_1_1_reservoir___outlet.html',1,'Reservoir::Implicit_Time::Reservoir_Outlet']]],
+  ['reservoir_5fparameters_5',['reservoir_parameters',['../structreservoir__parameters.html',1,'']]],
+  ['reservoir_5fstate_6',['reservoir_state',['../structreservoir__state.html',1,'']]],
+  ['reservoirkerneltest_7',['ReservoirKernelTest',['../class_reservoir_kernel_test.html',1,'']]],
+  ['reservoirtimelesskerneltest_8',['ReservoirTimelessKernelTest',['../class_reservoir_timeless_kernel_test.html',1,'']]],
+  ['routing_5fparams_9',['routing_params',['../structrouting__params.html',1,'']]]
 ];
