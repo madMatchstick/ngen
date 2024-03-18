@@ -1,9 +1,8 @@
 var searchData=
 [
-  ['pdm03_5fstruct_0',['pdm03_struct',['../structpdm03__struct.html',1,'']]],
-  ['pdm03kerneltest_1',['Pdm03KernelTest',['../class_pdm03_kernel_test.html',1,'']]],
-  ['pointfeature_2',['PointFeature',['../classgeojson_1_1_point_feature.html',1,'geojson']]],
-  ['polygonfeature_3',['PolygonFeature',['../classgeojson_1_1_polygon_feature.html',1,'geojson']]],
-  ['preorder_5fvisitor_4',['preorder_visitor',['../structnetwork_1_1preorder__visitor.html',1,'network']]],
-  ['propertyvisitor_5',['PropertyVisitor',['../structgeojson_1_1_j_s_o_n_property_1_1_property_visitor.html',1,'geojson::JSONProperty']]]
+  ['request_5ffrom_5fempty_5fnexus_0',['request_from_empty_nexus',['../structrequest__from__empty__nexus.html',1,'']]],
+  ['reservoirkerneltest_1',['ReservoirKernelTest',['../class_reservoir_kernel_test.html',1,'']]],
+  ['reservoirtimelesskerneltest_2',['ReservoirTimelessKernelTest',['../class_reservoir_timeless_kernel_test.html',1,'']]],
+  ['routing_3',['Routing',['../structrealization_1_1config_1_1_routing.html',1,'realization::config']]],
+  ['routing_5fparams_4',['routing_params',['../structrouting__params.html',1,'']]]
 ];

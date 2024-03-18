@@ -1,6 +1,6 @@
 var classgeojson_1_1_j_s_o_n_property =
 [
-    [ "PropertyVisitor", "structgeojson_1_1_j_s_o_n_property_1_1_property_visitor.html", "structgeojson_1_1_j_s_o_n_property_1_1_property_visitor" ],
+    [ "AsVectorVisitor", "structgeojson_1_1_j_s_o_n_property_1_1_as_vector_visitor.html", "structgeojson_1_1_j_s_o_n_property_1_1_as_vector_visitor" ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a67c06aa54d9f12507f8255ad3d6d860d", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a8124b60e4f0a5d500d7635205344a158", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#afec6dc919d680e882f35f36581998cda", null ],
@@ -11,6 +11,7 @@ var classgeojson_1_1_j_s_o_n_property =
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a6b05fb3e595c923c3bef0f612261b425", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a32e135bb45052932fbe664c5df99d15e", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a1985756ca4fe4ece17abb8d2eec325e9", null ],
+    [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a4bff10305e1883674e6d098d22953af5", null ],
     [ "~JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#a9db9c33cbddf921ac9b9475ff82ef09c", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#ad4b8c22025b4a8c5612bcca430ba2e06", null ],
     [ "JSONProperty", "classgeojson_1_1_j_s_o_n_property.html#acd172570a8cec61a63ae05021d34b0d9", null ],
@@ -31,13 +32,10 @@ var classgeojson_1_1_j_s_o_n_property =
     [ "has_key", "classgeojson_1_1_j_s_o_n_property.html#afe12f98e6dafc1abb943d3865e601ec1", null ],
     [ "keys", "classgeojson_1_1_j_s_o_n_property.html#a11b0d4cecda0a3f85cd9034d8638ac73", null ],
     [ "operator!=", "classgeojson_1_1_j_s_o_n_property.html#ae1815462ba6862ac036d8ce098b7d941", null ],
-    [ "operator==", "classgeojson_1_1_j_s_o_n_property.html#a4a15af4438529f165427486327d67e8e", null ],
-    [ "boolean", "classgeojson_1_1_j_s_o_n_property.html#a9797564a74d052880a95704bcbb5ae5e", null ],
+    [ "operator==", "classgeojson_1_1_j_s_o_n_property.html#a06efd343c58f799d6636b04be36f8d5a", null ],
+    [ "print_property", "classgeojson_1_1_j_s_o_n_property.html#a6d3173d4b100035a3a8dafbaa25a84a2", null ],
     [ "data", "classgeojson_1_1_j_s_o_n_property.html#af405297de7dae29f9bf8ee584ba08858", null ],
     [ "key", "classgeojson_1_1_j_s_o_n_property.html#a3fe2ade16ff994a3e9e3fbf106ba690a", null ],
-    [ "natural_number", "classgeojson_1_1_j_s_o_n_property.html#ab0c6d37af263c7ba85a34d56275e2b8f", null ],
-    [ "real_number", "classgeojson_1_1_j_s_o_n_property.html#ab682d395ee8b90c23bf2f82c1bc556e1", null ],
-    [ "string", "classgeojson_1_1_j_s_o_n_property.html#a864b411ee1ce948aef80e9cbc8e47e4a", null ],
     [ "type", "classgeojson_1_1_j_s_o_n_property.html#a1d92b4f0ec6df2fef86a7b4ef183973b", null ],
     [ "value_list", "classgeojson_1_1_j_s_o_n_property.html#a1bd38dc99c8773465bbd8989b9f563ca", null ],
     [ "values", "classgeojson_1_1_j_s_o_n_property.html#ae1d7def48bf2d357a5a1b086930a74b2", null ]

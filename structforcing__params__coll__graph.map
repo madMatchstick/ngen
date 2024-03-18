@@ -1,5 +1,7 @@
 <map id="forcing_params" name="forcing_params">
-<area shape="rect" id="node1" title="forcing_params providing configuration information for forcing time period and source." alt="" coords="5,345,136,437"/>
-<area shape="rect" id="node2" title=" " alt="" coords="31,147,110,224"/>
-<area shape="rect" id="node3" title=" " alt="" coords="9,5,133,97"/>
+<area shape="rect" id="Node000001" title="forcing_params providing configuration information for forcing time period and source." alt="" coords="5,323,132,408"/>
+<area shape="rect" id="Node000002" title=" " alt="" coords="34,135,103,200"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="71,200,71,306,66,306,66,200"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="11,5,126,85"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="71,100,71,135,66,135,66,100"/>
 </map>
