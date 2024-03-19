@@ -229,6 +229,20 @@ ngen_add_test(
     #   NGEN_WITH_MPI
 )
 
+########################## Partition_One Tests
+ngen_add_test(
+    test_partition_one
+    OBJECTS
+        utils/Partition_One_Test.cpp
+    LIBRARIES
+        gmock
+        NGen::core
+        NGen::geojson
+        NGen::geopackage
+    REQUIRES
+        NGEN_WITH_SQLITE
+)
+
 ########################## MultiLayer Tests
 ngen_add_test(
     test_multilayer
@@ -452,7 +466,6 @@ ngen_add_test(
         NGen::logging
         NGen::ngen_bmi
         testbmicppmodel
-        
 )
 
 # Discover for test_all
